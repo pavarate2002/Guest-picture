@@ -1,0 +1,12 @@
+{
+  "name": "guess-picture-game",
+  "version": "3.0.0",
+  "description": "Guess the Picture - single-file Host & Player game server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
