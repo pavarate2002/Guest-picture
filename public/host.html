@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guess the Picture — Host</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Kanit:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: 'Kanit', 'Segoe UI', sans-serif;
+    background: radial-gradient(circle at 50% 0%, #14213d 0%, #05070f 65%, #000 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 15px;
+  }
+  .card {
+    position: relative;
+    background: linear-gradient(160deg, rgba(10,15,30,0.95), rgba(5,8,18,0.98));
+    border-radius: 22px;
+    padding: 34px 30px 38px;
+    width: 100%;
+    max-width: 520px;
+    text-align: center;
+    border: 1px solid rgba(0, 229, 255, 0.35);
+    box-shadow:
+      0 0 25px rgba(0, 229, 255, 0.25),
+      0 0 60px rgba(255, 0, 200, 0.12),
+      inset 0 0 30px rgba(0, 229, 255, 0.05);
+  }
+  .user-link {
+    position: absolute; top: 20px; right: 24px;
+    font-family: 'Kanit', sans-serif; font-size: 12px; font-weight: 600;
+    color: #6f89ab; text-decoration: none;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.04);
+    padding: 6px 12px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: color .15s ease, border-color .15s ease, background .15s ease;
+  }
+  .user-link:hover { color: #9fd6ff; border-color: rgba(0,229,255,0.4); background: rgba(0,229,255,0.08); }
+
+  h1 {
+    margin: 6px 0 6px;
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-size: 1.9em;
+    letter-spacing: 2px;
+    color: #fff;
+    text-shadow: 0 0 6px #00e5ff, 0 0 14px #00e5ff, 0 0 26px #00b8ff, 0 0 46px #ff00c8;
+  }
+  .role-tag {
+    display: inline-block;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.65em;
+    color: #ffd23f;
+    letter-spacing: 2px;
+    margin-bottom: 22px;
+  }
+
+  .field { text-align: left; margin-bottom: 18px; }
+  .field label {
+    display: block;
+    font-size: 0.85em;
+    color: #9fd6ff;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+  .field input[type="text"] {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(0,229,255,0.35);
+    background: #0a0f1e;
+    color: #eaf6ff;
+    font-family: 'Kanit', sans-serif;
+    font-size: 0.95em;
+    outline: none;
+  }
+  .field input[type="text"]:focus {
+    border-color: #00e5ff;
+    box-shadow: 0 0 12px rgba(0,229,255,0.35);
+  }
+
+  .upload-box {
+    border: 2px dashed rgba(0,229,255,0.35);
+    border-radius: 14px;
+    padding: 22px;
+    margin-bottom: 20px;
+    cursor: pointer;
+    transition: border-color .2s ease, background .2s ease;
+    background: rgba(255,255,255,0.02);
+  }
+  .upload-box:hover { border-color: #00e5ff; background: rgba(0,229,255,0.05); }
+  .upload-box span { color: #7d93b5; font-size: 0.9em; }
+  input[type="file"] { display: none; }
+
+  .preview {
+    width: 100%;
+    max-height: 220px;
+    border-radius: 12px;
+    margin-bottom: 18px;
+    display: none;
+    object-fit: cover;
+    border: 1px solid rgba(0,229,255,0.35);
+  }
+
+  .btn-send {
+    width: 100%;
+    border: none;
+    padding: 14px 20px;
+    border-radius: 50px;
+    font-family: 'Kanit', sans-serif;
+    font-size: 1em;
+    font-weight: 700;
+    cursor: pointer;
+    color: #001018;
+    letter-spacing: 0.5px;
+    background: linear-gradient(135deg, #00e5ff, #0077ff);
+    box-shadow: 0 0 16px rgba(0,229,255,0.55);
+    transition: transform 0.15s ease, filter 0.15s ease;
+  }
+  .btn-send:hover { transform: translateY(-2px); filter: brightness(1.15); }
+  .btn-send:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  .status {
+    margin-top: 18px;
+    min-height: 1.3em;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.85em;
+    letter-spacing: 0.5px;
+    color: #39ff14;
+    text-shadow: 0 0 8px rgba(57,255,20,0.6);
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <a class="user-link" href="/" title="Go to shared screen">🖥️ User</a>
+    <h1>🖼️ GUESS THE PICTURE</h1>
+    <div class="role-tag">HOST CONTROL</div>
+
+    <div class="upload-box" id="uploadBox">
+      <span id="uploadLabel">📤 Click to upload a picture</span>
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+    <img class="preview" id="preview" alt="Preview">
+
+    <div class="field">
+      <label for="questionInput">❓ Question / Prompt</label>
+      <input type="text" id="questionInput" placeholder="e.g. What part is this?" maxlength="200">
+    </div>
+
+    <button class="btn-send" id="sendBtn" disabled>🚀 Send to Game</button>
+    <div class="status" id="status"></div>
+  </div>
+
+<script>
+  const uploadBox = document.getElementById('uploadBox');
+  const uploadLabel = document.getElementById('uploadLabel');
+  const fileInput = document.getElementById('fileInput');
+  const preview = document.getElementById('preview');
+  const questionInput = document.getElementById('questionInput');
+  const sendBtn = document.getElementById('sendBtn');
+  const statusEl = document.getElementById('status');
+
+  let currentImageData = null;
+
+  uploadBox.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      currentImageData = evt.target.result;
+      preview.src = currentImageData;
+      preview.style.display = 'block';
+      uploadLabel.textContent = '✅ ' + file.name;
+      sendBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  sendBtn.addEventListener('click', async () => {
+    if (!currentImageData) return;
+    sendBtn.disabled = true;
+    statusEl.textContent = 'Sending...';
+    try {
+      await fetch('/api/host/set-game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageData: currentImageData, question: questionInput.value.trim() })
+      });
+      statusEl.textContent = '✅ Sent! The User screen is ready to play.';
+    } catch (err) {
+      statusEl.textContent = '❌ Failed to send. Please try again.';
+    } finally {
+      sendBtn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
