@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guess the Picture 🖼️</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Kanit:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .top-link {
+    display: block;
+    text-align: right;
+    color: rgba(255,255,255,0.4);
+    font-size: 0.8em;
+    margin-bottom: 10px;
+    text-decoration: none;
+  }
+  .top-link:hover { color: #00e5ff; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <a href="index.html" class="top-link">← Leave game</a>
+    <h1>🖼️ GUESS THE PICTURE</h1>
+
+    <div id="waitingScreen">
+      <p class="subtitle">Waiting for the host to start the game...</p>
+    </div>
+
+    <div id="gameScreen" style="display:none;">
+      <div class="badge" id="questionBadge">Question 1 / 8</div>
+      <div class="question-text" id="questionText"></div>
+
+      <div class="board-wrapper" id="boardWrapper">
+        <div class="sharp-layer" id="sharpLayer"></div>
+        <div class="grid" id="grid"></div>
+      </div>
+
+      <div class="countdown" id="countdown"></div>
+      <div class="status" id="status"></div>
+
+      <div class="controls" style="margin-top: 20px;">
+        <button class="btn btn-cyan" id="nextBtn">⏭ Next Question</button>
+      </div>
+    </div>
+
+    <div id="gameOverScreen" style="display:none;">
+      <p class="subtitle" style="font-size:1.1em; color:#39ff14;">🎉 Game Finished! Thanks for playing.</p>
+    </div>
+  </div>
+
+<script>
+  const TOTAL_TILES = 16;
+  const waitingScreen = document.getElementById('waitingScreen');
+  const gameScreen = document.getElementById('gameScreen');
+  const gameOverScreen = document.getElementById('gameOverScreen');
+  const questionBadge = document.getElementById('questionBadge');
+  const questionText = document.getElementById('questionText');
+  const sharpLayer = document.getElementById('sharpLayer');
+  const grid = document.getElementById('grid');
+  const countdownEl = document.getElementById('countdown');
+  const statusEl = document.getElementById('status');
+  const nextBtn = document.getElementById('nextBtn');
+
+  let builtForIndex = -1;
+
+  function buildGrid() {
+    grid.innerHTML = '';
+    for (let i = 0; i < TOTAL_TILES; i++) {
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      tile.dataset.index = i;
+      tile.textContent = '?';
+      grid.appendChild(tile);
+    }
+  }
+
+  function applyRevealed(count) {
+    const tiles = grid.querySelectorAll('.tile');
+    tiles.forEach((tile, i) => {
+      if (i < count) tile.classList.add('revealed');
+      else tile.classList.remove('revealed');
+    });
+  }
+
+  async function pollState() {
+    try {
+      const res = await fetch('/api/state');
+      const s = await res.json();
+
+      if (s.gameOver) {
+        waitingScreen.style.display = 'none';
+        gameScreen.style.display = 'none';
+        gameOverScreen.style.display = 'block';
+        return;
+      }
+
+      if (!s.gameStarted) {
+        waitingScreen.style.display = 'block';
+        gameScreen.style.display = 'none';
+        gameOverScreen.style.display = 'none';
+        return;
+      }
+
+      waitingScreen.style.display = 'none';
+      gameOverScreen.style.display = 'none';
+      gameScreen.style.display = 'block';
+
+      if (builtForIndex !== s.currentIndex) {
+        buildGrid();
+        builtForIndex = s.currentIndex;
+      }
+
+      questionBadge.textContent = `Question ${s.currentIndex + 1} / ${s.totalQuestions}`;
+      questionText.textContent = s.currentQuestion.questionText || '';
+      sharpLayer.style.backgroundImage = s.currentQuestion.image ? `url('${s.currentQuestion.image}')` : 'none';
+
+      applyRevealed(s.tilesRevealed);
+
+      statusEl.textContent = `Revealed ${s.tilesRevealed} / ${s.totalTiles} tiles`;
+
+      if (s.tilesRevealed >= s.totalTiles) {
+        countdownEl.textContent = '✅ Fully revealed';
+      } else if (s.timerRunning) {
+        countdownEl.textContent = `Next tile in: ${s.secondsToNextTile}s`;
+      } else {
+        countdownEl.textContent = '⏸ Paused by host';
+      }
+    } catch (e) { /* ignore transient errors */ }
+  }
+
+  nextBtn.addEventListener('click', async () => {
+    await fetch('/api/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    pollState();
+  });
+
+  pollState();
+  setInterval(pollState, 1000);
+</script>
+</body>
+</html>
