@@ -1,902 +1,196 @@
-/**
- * Guess the Picture - Host & Player Game
- * SINGLE FILE VERSION - everything (server + all pages + styling) lives in
- * this one server.js file. No "public" folder, no separate .html/.css files.
- * Pure Node.js built-in modules only - nothing to npm install.
- *
- * Deploy on Render.com as a "Web Service" with:
- *   Start Command: node server.js
- * (This app needs a running server for real-time Host/Player sync, so it
- *  CANNOT be deployed as a "Static Site".)
- */
+// Transformation Night - Guest Picture
+// Real-time Host/User game with Socket.io
+const express = require('express');
 const http = require('http');
-const url = require('url');
+const { Server } = require('socket.io');
 
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { maxHttpBufferSize: 1e8 }); // 100MB for image payloads
+
+const HOST_CODE = 'pqc';
 const PORT = process.env.PORT || 3000;
-const HOST_PASSWORD = 'pqc';
-const TOTAL_QUESTIONS = 8;
-const TOTAL_TILES = 16; // 4 x 4 grid
-const SECONDS_PER_TILE = 5;
-const MAX_BODY_BYTES = 8 * 1024 * 1024; // 8MB safety limit per request
 
-function freshQuestions() {
-  return Array.from({ length: TOTAL_QUESTIONS }, () => ({ image: null, questionText: '' }));
-}
+app.use(express.static('public'));
 
-// Fisher-Yates shuffle - returns a new randomly-ordered array [0..n-1]
-function shuffledIndices(n) {
-  const arr = Array.from({ length: n }, (_, i) => i);
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-// ---- In-memory game state (single shared game session) ----
-const state = {
-  totalQuestions: TOTAL_QUESTIONS,
-  totalTiles: TOTAL_TILES,
-  secondsPerTile: SECONDS_PER_TILE,
-  questions: freshQuestions(),
-  gameStarted: false,
-  gameOver: false,
-  currentIndex: 0,
-  tilesRevealed: 0,
-  timerRunning: false,
-  tickCounter: 0,
-  revealOrder: shuffledIndices(TOTAL_TILES), // random order in which tiles get revealed for the CURRENT question
-};
-
-function startNewQuestionReveal() {
-  state.tilesRevealed = 0;
-  state.tickCounter = 0;
-  state.revealOrder = shuffledIndices(state.totalTiles);
-}
-
-// ---- Server-driven reveal timer (ticks every second) ----
-setInterval(() => {
-  if (state.gameStarted && state.timerRunning && !state.gameOver) {
-    state.tickCounter++;
-    if (state.tickCounter >= state.secondsPerTile) {
-      state.tickCounter = 0;
-      if (state.tilesRevealed < state.totalTiles) {
-        state.tilesRevealed++;
-      }
-      if (state.tilesRevealed >= state.totalTiles) {
-        state.timerRunning = false;
-      }
-    }
-  }
-}, 1000);
-
-function publicState() {
-  const q = state.questions[state.currentIndex] || { image: null, questionText: '' };
+// ---- Game state (in-memory) ----
+function freshState() {
   return {
-    totalQuestions: state.totalQuestions,
-    totalTiles: state.totalTiles,
-    secondsPerTile: state.secondsPerTile,
-    gameStarted: state.gameStarted,
-    gameOver: state.gameOver,
-    currentIndex: state.currentIndex,
-    tilesRevealed: state.tilesRevealed,
-    timerRunning: state.timerRunning,
-    secondsToNextTile: state.timerRunning ? (state.secondsPerTile - state.tickCounter) : null,
-    revealOrder: state.revealOrder,
-    currentQuestion: { image: q.image, questionText: q.questionText },
-    questionsMeta: state.questions.map(item => ({
-      hasImage: !!item.image,
-      hasText: !!item.questionText,
-    })),
+    slides: [],        // [{ img, q1, q2, q3 }]
+    index: 0,          // current slide index
+    revealed: false,   // is the image shown to users
+    countdown: {
+      running: false,
+      startAt: 0,      // server timestamp (ms) when countdown started
+      duration: 5,     // seconds
+      paused: false,
+      pausedRemaining: 0
+    }
+  };
+}
+let state = freshState();
+
+// Build the payload sent to clients (users don't need to know slide count)
+function publicState(forHost) {
+  const cur = state.slides[state.index] || null;
+  return {
+    total: state.slides.length,
+    index: state.index,
+    revealed: state.revealed,
+    countdown: state.countdown,
+    current: cur ? {
+      img: state.revealed || forHost ? cur.img : null, // hide image from user until revealed
+      q1: cur.q1, q2: cur.q2, q3: cur.q3
+    } : null,
+    // host-only full list
+    slides: forHost ? state.slides.map(s => ({ q1: s.q1, q2: s.q2, q3: s.q3, hasImg: !!s.img })) : undefined
   };
 }
 
-function sendJSON(res, statusCode, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-  });
-  res.end(body);
+function broadcast() {
+  io.to('hosts').emit('state', publicState(true));
+  io.to('users').emit('state', publicState(false));
 }
 
-function sendHTML(res, html) {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end(html);
-}
+io.on('connection', (socket) => {
+  socket.isHost = false;
 
-function readJSONBody(req, callback) {
-  let data = '';
-  let tooBig = false;
-  req.on('data', chunk => {
-    data += chunk;
-    if (data.length > MAX_BODY_BYTES) {
-      tooBig = true;
-      req.destroy();
-    }
-  });
-  req.on('end', () => {
-    if (tooBig) return callback(new Error('Payload too large'), null);
-    if (!data) return callback(null, {});
-    try {
-      callback(null, JSON.parse(data));
-    } catch (e) {
-      callback(e, null);
-    }
-  });
-}
-
-/* =========================================================================
-   SHARED STYLE (embedded once, reused across every page as a <style> block)
-   ========================================================================= */
-const STYLE_BLOCK = `
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Kanit:wght@400;600&display=swap" rel="stylesheet">
-<style>
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    font-family: 'Kanit', 'Segoe UI', sans-serif;
-    background: radial-gradient(circle at 50% 0%, #14213d 0%, #05070f 65%, #000 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 30px 15px;
-    overflow-x: hidden;
-  }
-  .card {
-    position: relative;
-    background: linear-gradient(160deg, rgba(10,15,30,0.95), rgba(5,8,18,0.98));
-    border-radius: 22px;
-    padding: 34px 30px 38px;
-    width: 100%;
-    max-width: 560px;
-    text-align: center;
-    border: 1px solid rgba(0, 229, 255, 0.35);
-    box-shadow: 0 0 25px rgba(0,229,255,0.25), 0 0 60px rgba(255,0,200,0.12), inset 0 0 30px rgba(0,229,255,0.05);
-  }
-  .card.wide { max-width: 720px; }
-  h1 {
-    margin: 0 0 10px;
-    font-family: 'Orbitron', sans-serif;
-    font-weight: 900;
-    font-size: 2.1em;
-    letter-spacing: 2px;
-    color: #fff;
-    text-shadow: 0 0 6px #00e5ff, 0 0 14px #00e5ff, 0 0 26px #00b8ff, 0 0 46px #ff00c8;
-    animation: flicker 3.5s infinite alternate;
-  }
-  h2 {
-    font-family: 'Orbitron', sans-serif;
-    color: #00e5ff;
-    text-shadow: 0 0 8px rgba(0,229,255,0.7);
-    letter-spacing: 1px;
-    font-size: 1.1em;
-  }
-  @keyframes flicker {
-    0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
-      text-shadow: 0 0 6px #00e5ff, 0 0 14px #00e5ff, 0 0 26px #00b8ff, 0 0 46px #ff00c8;
-    }
-    20%, 24%, 55% { text-shadow: none; opacity: 0.55; }
-  }
-  .subtitle { color: rgba(255,255,255,0.55); margin-bottom: 22px; font-size: 0.95em; }
-  .controls { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; margin-bottom: 26px; }
-  .btn {
-    border: none; padding: 11px 22px; border-radius: 50px;
-    font-family: 'Kanit', sans-serif; font-size: 0.95em; font-weight: 600;
-    cursor: pointer; color: #fff; letter-spacing: 0.5px;
-    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
-    background: rgba(255,255,255,0.04); border: 1px solid transparent;
-  }
-  .btn:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.2); }
-  .btn:active:not(:disabled) { transform: translateY(0); }
-  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
-  .btn-cyan { border-color: #00e5ff; box-shadow: 0 0 10px rgba(0,229,255,0.6), inset 0 0 8px rgba(0,229,255,0.15); color: #00e5ff; }
-  .btn-pink { border-color: #ff2e93; box-shadow: 0 0 10px rgba(255,46,147,0.6), inset 0 0 8px rgba(255,46,147,0.15); color: #ff2e93; }
-  .btn-green { border-color: #39ff14; box-shadow: 0 0 10px rgba(57,255,20,0.6), inset 0 0 8px rgba(57,255,20,0.15); color: #39ff14; }
-  .btn-amber { border-color: #ffb400; box-shadow: 0 0 10px rgba(255,180,0,0.6), inset 0 0 8px rgba(255,180,0,0.15); color: #ffb400; }
-  input[type="text"], input[type="password"], textarea {
-    width: 100%; padding: 10px 14px; border-radius: 10px;
-    border: 1px solid rgba(0,229,255,0.4); background: rgba(0,0,0,0.4);
-    color: #fff; font-family: 'Kanit', sans-serif; font-size: 0.95em; outline: none;
-  }
-  input[type="text"]:focus, input[type="password"]:focus, textarea:focus {
-    border-color: #00e5ff; box-shadow: 0 0 10px rgba(0,229,255,0.5);
-  }
-  input[type="file"] { display: none; }
-  .board-wrapper {
-    position: relative; width: 100%; max-width: 460px; aspect-ratio: 1 / 1;
-    margin: 0 auto; border-radius: 16px; overflow: hidden; background: #05070f;
-    border: 1px solid rgba(0,229,255,0.4);
-    box-shadow: 0 0 20px rgba(0,229,255,0.35), 0 0 45px rgba(255,0,200,0.15), inset 0 0 25px rgba(0,0,0,0.6);
-  }
-  .placeholder {
-    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    color: rgba(255,255,255,0.35); font-size: 1em; padding: 20px; text-align: center; z-index: 3;
-    text-shadow: 0 0 8px rgba(0,229,255,0.3);
-  }
-  .sharp-layer { position: absolute; inset: 0; background-position: center; background-size: cover; background-repeat: no-repeat; z-index: 1; }
-  .grid {
-    position: absolute; inset: 0; display: grid;
-    grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr);
-    gap: 0; z-index: 2;
-  }
-  .tile {
-    background: linear-gradient(160deg, #0d1b3d, #050a1c); color: #00e5ff;
-    font-family: 'Orbitron', sans-serif; font-size: 1.3em; font-weight: 700;
-    display: flex; align-items: center; justify-content: center; user-select: none;
-    transition: opacity 0.5s ease;
-    box-shadow: inset 0 0 0 1px rgba(0,229,255,0.35), inset 0 0 12px rgba(0,229,255,0.12);
-    text-shadow: 0 0 8px rgba(0,229,255,0.8);
-  }
-  .tile.revealed { opacity: 0; pointer-events: none; }
-  .status { margin-top: 18px; color: #00e5ff; font-family: 'Orbitron', sans-serif; font-size: 0.9em; letter-spacing: 1px; min-height: 1.3em; text-shadow: 0 0 8px rgba(0,229,255,0.6); }
-  .badge {
-    display: inline-block; padding: 6px 16px; border-radius: 50px; border: 1px solid rgba(0,229,255,0.5);
-    color: #00e5ff; font-family: 'Orbitron', sans-serif; font-size: 0.85em; letter-spacing: 1px;
-    margin-bottom: 16px; box-shadow: 0 0 10px rgba(0,229,255,0.35);
-  }
-  .question-text { color: #fff; font-size: 1.05em; margin: 6px 0 20px; min-height: 1.3em; text-shadow: 0 0 6px rgba(255,255,255,0.25); }
-  .countdown { font-family: 'Orbitron', sans-serif; font-size: 2.4em; color: #ff2e93; text-shadow: 0 0 14px rgba(255,46,147,0.8); margin-top: 14px; }
-  .role-buttons { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; }
-  .role-buttons .btn { padding: 18px; font-size: 1.1em; }
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 50; }
-  .modal-box {
-    background: linear-gradient(160deg, rgba(10,15,30,0.98), rgba(5,8,18,1));
-    border: 1px solid rgba(0,229,255,0.5); box-shadow: 0 0 30px rgba(0,229,255,0.4);
-    border-radius: 18px; padding: 28px; width: 90%; max-width: 360px; text-align: center;
-  }
-  .modal-box h3 { font-family: 'Orbitron', sans-serif; color: #fff; text-shadow: 0 0 8px rgba(0,229,255,0.6); margin-top: 0; }
-  .error-text { color: #ff2e93; font-size: 0.85em; margin-top: 8px; min-height: 1.2em; }
-  .slots { display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
-  .slot { display: flex; gap: 12px; align-items: center; background: rgba(255,255,255,0.03); border: 1px solid rgba(0,229,255,0.25); border-radius: 14px; padding: 12px; text-align: left; }
-  .slot-num { font-family: 'Orbitron', sans-serif; color: #00e5ff; font-weight: 700; width: 28px; flex-shrink: 0; text-align: center; }
-  .slot-thumb {
-    width: 56px; height: 56px; border-radius: 8px; background: #0d1b3d; background-size: cover; background-position: center;
-    border: 1px solid rgba(0,229,255,0.3); flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-    color: rgba(255,255,255,0.25); font-size: 0.7em; cursor: pointer; overflow: hidden;
-  }
-  .slot-fields { flex: 1; display: flex; flex-direction: column; gap: 6px; }
-  .slot-fields input { font-size: 0.85em; padding: 8px 10px; }
-  .slot-status { font-size: 0.7em; color: rgba(255,255,255,0.4); }
-  .host-controls { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 20px 0; }
-  .status-panel { background: rgba(255,255,255,0.03); border: 1px solid rgba(0,229,255,0.25); border-radius: 14px; padding: 14px 18px; margin-bottom: 20px; font-size: 0.9em; color: rgba(255,255,255,0.75); text-align: left; line-height: 1.6; }
-  .status-panel b { color: #00e5ff; }
-  .top-link { display: block; text-align: right; color: rgba(255,255,255,0.4); font-size: 0.8em; margin-bottom: 10px; text-decoration: none; }
-  .top-link:hover { color: #00e5ff; }
-</style>
-`;
-
-/* =========================================================================
-   PAGE: Landing page (role selection)
-   ========================================================================= */
-const INDEX_HTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Guess the Picture 🖼️</title>
-${STYLE_BLOCK}
-</head>
-<body>
-  <div class="card">
-    <h1>🖼️ GUESS THE PICTURE</h1>
-    <p class="subtitle">Choose your role to join the game</p>
-    <div class="role-buttons">
-      <button class="btn btn-cyan" id="hostBtn">🔐 I'm the Host</button>
-      <button class="btn btn-green" id="userBtn">🙋 Join as Player</button>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="modalOverlay" style="display:none;">
-    <div class="modal-box">
-      <h3>Host Login</h3>
-      <input type="password" id="passwordInput" placeholder="Enter host password">
-      <div class="error-text" id="errorText"></div>
-      <div class="controls" style="margin-top:18px;">
-        <button class="btn btn-cyan" id="confirmBtn">Enter</button>
-        <button class="btn btn-pink" id="cancelBtn">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-<script>
-  var hostBtn = document.getElementById('hostBtn');
-  var userBtn = document.getElementById('userBtn');
-  var modalOverlay = document.getElementById('modalOverlay');
-  var passwordInput = document.getElementById('passwordInput');
-  var errorText = document.getElementById('errorText');
-  var confirmBtn = document.getElementById('confirmBtn');
-  var cancelBtn = document.getElementById('cancelBtn');
-
-  userBtn.addEventListener('click', function () { window.location.href = '/user'; });
-
-  hostBtn.addEventListener('click', function () {
-    modalOverlay.style.display = 'flex';
-    errorText.textContent = '';
-    passwordInput.value = '';
-    passwordInput.focus();
+  socket.on('join:user', () => {
+    socket.join('users');
+    socket.emit('state', publicState(false));
   });
 
-  cancelBtn.addEventListener('click', function () { modalOverlay.style.display = 'none'; });
-
-  function tryLogin() {
-    var password = passwordInput.value;
-    fetch('/api/host/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: password }),
-    }).then(function (res) {
-      return res.json();
-    }).then(function (data) {
-      if (data.ok) {
-        sessionStorage.setItem('hostPassword', password);
-        window.location.href = '/host';
-      } else {
-        errorText.textContent = 'Incorrect password. Please try again.';
-      }
-    }).catch(function () {
-      errorText.textContent = 'Connection error. Please try again.';
-    });
-  }
-
-  confirmBtn.addEventListener('click', tryLogin);
-  passwordInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') tryLogin(); });
-</script>
-</body>
-</html>`;
-
-/* =========================================================================
-   PAGE: Host Dashboard
-   ========================================================================= */
-const HOST_HTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Host Dashboard - Guess the Picture</title>
-${STYLE_BLOCK}
-</head>
-<body>
-  <div class="card wide">
-    <a href="/" class="top-link">← Back to role selection</a>
-    <h1>🔐 HOST DASHBOARD</h1>
-    <p class="subtitle">Upload 8 pictures &amp; questions, then control the game</p>
-
-    <div class="status-panel" id="statusPanel">Loading status...</div>
-
-    <div class="host-controls">
-      <button class="btn btn-green" id="startBtn" disabled>▶ Start Game</button>
-      <button class="btn btn-cyan" id="nextBtn" disabled>⏭ Next Question</button>
-      <button class="btn btn-pink" id="resetBtn">🔄 Reset Game</button>
-    </div>
-
-    <h2 style="margin-bottom: 14px;">Question Slots (8)</h2>
-    <div class="slots" id="slots"></div>
-  </div>
-
-<script>
-  var password = sessionStorage.getItem('hostPassword');
-  if (password !== 'pqc') { window.location.href = '/'; }
-
-  var slotsEl = document.getElementById('slots');
-  var statusPanel = document.getElementById('statusPanel');
-  var startBtn = document.getElementById('startBtn');
-  var nextBtn = document.getElementById('nextBtn');
-  var resetBtn = document.getElementById('resetBtn');
-
-  var TOTAL = 8;
-  var localQuestions = [];
-  for (var qi = 0; qi < TOTAL; qi++) { localQuestions.push({ image: null, questionText: '' }); }
-  var latestState = null;
-  var requestInFlight = false;
-  var saveTimers = {};
-
-  function escapeAttr(str) {
-    return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-
-  function buildSlots() {
-    slotsEl.innerHTML = '';
-    for (var i = 0; i < TOTAL; i++) {
-      (function (i) {
-        var q = localQuestions[i];
-        var slot = document.createElement('div');
-        slot.className = 'slot';
-
-        var numDiv = document.createElement('div');
-        numDiv.className = 'slot-num';
-        numDiv.textContent = '#' + (i + 1);
-
-        var thumb = document.createElement('div');
-        thumb.className = 'slot-thumb';
-        thumb.id = 'thumb-' + i;
-        if (q.image) {
-          thumb.style.backgroundImage = 'url(' + q.image + ')';
-        } else {
-          thumb.textContent = '📤';
-        }
-
-        var fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.accept = 'image/*';
-        fileInput.id = 'file-' + i;
-        fileInput.style.display = 'none';
-
-        var fieldsDiv = document.createElement('div');
-        fieldsDiv.className = 'slot-fields';
-
-        var qtextInput = document.createElement('input');
-        qtextInput.type = 'text';
-        qtextInput.id = 'qtext-' + i;
-        qtextInput.placeholder = 'Question text (optional)';
-        qtextInput.value = q.questionText || '';
-
-        var statusDiv = document.createElement('div');
-        statusDiv.className = 'slot-status';
-        statusDiv.id = 'slotstatus-' + i;
-        statusDiv.textContent = q.image ? 'Image uploaded' : 'No image yet';
-
-        fieldsDiv.appendChild(qtextInput);
-        fieldsDiv.appendChild(statusDiv);
-
-        slot.appendChild(numDiv);
-        slot.appendChild(thumb);
-        slot.appendChild(fileInput);
-        slot.appendChild(fieldsDiv);
-        slotsEl.appendChild(slot);
-
-        thumb.addEventListener('click', function () { fileInput.click(); });
-        fileInput.addEventListener('change', function (e) {
-          var file = e.target.files[0];
-          if (!file) return;
-          var reader = new FileReader();
-          reader.onload = function (evt) {
-            localQuestions[i].image = evt.target.result;
-            thumb.style.backgroundImage = 'url(' + evt.target.result + ')';
-            thumb.textContent = '';
-            saveQuestion(i);
-          };
-          reader.readAsDataURL(file);
-        });
-
-        qtextInput.addEventListener('input', function (e) {
-          localQuestions[i].questionText = e.target.value;
-          clearTimeout(saveTimers[i]);
-          saveTimers[i] = setTimeout(function () { saveQuestion(i); }, 600);
-        });
-      })(i);
-    }
-  }
-
-  function saveQuestion(index) {
-    var statusEl = document.getElementById('slotstatus-' + index);
-    statusEl.textContent = 'Saving...';
-    fetch('/api/host/question', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        password: password,
-        index: index,
-        image: localQuestions[index].image,
-        questionText: localQuestions[index].questionText,
-      }),
-    }).then(function (res) { return res.json(); })
-      .then(function (data) {
-        statusEl.textContent = data.ok ? 'Saved' : ('Error: ' + (data.error || 'unknown'));
-      }).catch(function () {
-        statusEl.textContent = 'Save failed (connection error)';
-      });
-  }
-
-  function loadQuestions() {
-    fetch('/api/host/questions?password=' + encodeURIComponent(password))
-      .then(function (res) { return res.json(); })
-      .then(function (data) {
-        if (data.ok) { localQuestions = data.questions; buildSlots(); }
-      }).catch(function () {});
-  }
-
-  function renderStatus() {
-    if (!latestState) return;
-    var s = latestState;
-    var statusHtml = '';
-    if (!s.gameStarted) {
-      statusHtml = '<b>Status:</b> Not started yet. Upload pictures then press Start.';
-    } else if (s.gameOver) {
-      statusHtml = 'Game Over! All 8 questions finished.';
+  socket.on('host:login', (code, cb) => {
+    if (code === HOST_CODE) {
+      socket.isHost = true;
+      socket.join('hosts');
+      socket.emit('state', publicState(true));
+      cb && cb({ ok: true });
     } else {
-      statusHtml = '<b>Question:</b> ' + (s.currentIndex + 1) + ' / ' + s.totalQuestions + ' &nbsp;|&nbsp; ' +
-        '<b>Tiles revealed:</b> ' + s.tilesRevealed + ' / ' + s.totalTiles + ' &nbsp;|&nbsp; ' +
-        '<b>Timer:</b> ' + (s.timerRunning ? ('Running (next tile in ' + s.secondsToNextTile + 's)') : 'Stopped (paused)');
+      cb && cb({ ok: false, msg: 'รหัสไม่ถูกต้อง' });
     }
-    statusPanel.innerHTML = statusHtml;
-
-    if (!requestInFlight) {
-      startBtn.disabled = s.gameStarted;
-      nextBtn.disabled = !s.gameStarted || s.gameOver;
-    }
-  }
-
-  function pollState() {
-    return fetch('/api/state')
-      .then(function (res) { return res.json(); })
-      .then(function (data) {
-        latestState = data;
-        renderStatus();
-      }).catch(function () {});
-  }
-
-  startBtn.addEventListener('click', function () {
-    if (requestInFlight) return;
-    requestInFlight = true;
-    startBtn.disabled = true;
-    fetch('/api/host/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: password }) })
-      .then(function () { return pollState(); })
-      .then(function () {
-        requestInFlight = false;
-        renderStatus();
-      });
   });
 
-  nextBtn.addEventListener('click', function () {
-    if (requestInFlight) return;
-    requestInFlight = true;
-    nextBtn.disabled = true;
-    fetch('/api/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-      .then(function () { return pollState(); })
-      .then(function () {
-        requestInFlight = false;
-        renderStatus();
-      });
-  });
+  const guard = (fn) => (...args) => { if (socket.isHost) fn(...args); };
 
-  resetBtn.addEventListener('click', function () {
-    if (!confirm('Reset the current game progress?')) return;
-    var clearQuestions = confirm('Also clear all uploaded pictures & questions? OK = clear, Cancel = keep them.');
-    fetch('/api/host/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: password, clearQuestions: clearQuestions }) })
-      .then(function () {
-        if (clearQuestions) {
-          localQuestions = [];
-          for (var qi2 = 0; qi2 < TOTAL; qi2++) { localQuestions.push({ image: null, questionText: '' }); }
-          buildSlots();
-        }
-        return pollState();
-      });
-  });
-
-  buildSlots();
-  loadQuestions();
-  pollState();
-  setInterval(pollState, 1000);
-</script>
-</body>
-</html>`;
-
-/* =========================================================================
-   PAGE: Player page
-   (Pause/Resume control lives here instead of the Host dashboard.
-    Uses an OPTIMISTIC UI update on click so the button/countdown reacts
-    instantly, instead of waiting for a full network round-trip.)
-   ========================================================================= */
-const USER_HTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Guess the Picture 🖼️</title>
-${STYLE_BLOCK}
-</head>
-<body>
-  <div class="card">
-    <a href="/" class="top-link">← Leave game</a>
-    <h1>🖼️ GUESS THE PICTURE</h1>
-
-    <div id="waitingScreen">
-      <p class="subtitle">Waiting for the host to start the game...</p>
-    </div>
-
-    <div id="gameScreen" style="display:none;">
-      <div class="badge" id="questionBadge">Question 1 / 8</div>
-      <div class="question-text" id="questionText"></div>
-      <div class="board-wrapper" id="boardWrapper">
-        <div class="sharp-layer" id="sharpLayer"></div>
-        <div class="grid" id="grid"></div>
-      </div>
-      <div class="countdown" id="countdown"></div>
-      <div class="status" id="status"></div>
-      <div class="controls" style="margin-top: 20px;">
-        <button class="btn btn-amber" id="stopResumeBtn">⏸ Stop Timer</button>
-        <button class="btn btn-cyan" id="nextBtn">⏭ Next Question</button>
-      </div>
-    </div>
-
-    <div id="gameOverScreen" style="display:none;">
-      <p class="subtitle" style="font-size:1.1em; color:#39ff14;">🎉 Game Finished! Thanks for playing.</p>
-    </div>
-  </div>
-
-<script>
-  var TOTAL_TILES = 16;
-  var waitingScreen = document.getElementById('waitingScreen');
-  var gameScreen = document.getElementById('gameScreen');
-  var gameOverScreen = document.getElementById('gameOverScreen');
-  var questionBadge = document.getElementById('questionBadge');
-  var questionText = document.getElementById('questionText');
-  var sharpLayer = document.getElementById('sharpLayer');
-  var grid = document.getElementById('grid');
-  var countdownEl = document.getElementById('countdown');
-  var statusEl = document.getElementById('status');
-  var nextBtn = document.getElementById('nextBtn');
-  var stopResumeBtn = document.getElementById('stopResumeBtn');
-
-  var builtForIndex = -1;
-  var latestState = null;
-  var pendingOverride = null;
-  var pendingOverrideSetAt = 0;
-  var stopResumeInFlight = false;
-  var nextInFlight = false;
-  var OVERRIDE_SAFETY_TIMEOUT_MS = 3000; // never trust an optimistic guess forever
-
-  function buildGrid() {
-    grid.innerHTML = '';
-    for (var i = 0; i < TOTAL_TILES; i++) {
-      var tile = document.createElement('div');
-      tile.className = 'tile';
-      tile.dataset.index = i;
-      tile.textContent = '?';
-      grid.appendChild(tile);
-    }
-  }
-
-  function applyRevealed(tilesRevealedCount, order) {
-    var revealedSet = {};
-    var list = order || [];
-    for (var i = 0; i < tilesRevealedCount && i < list.length; i++) {
-      revealedSet[list[i]] = true;
-    }
-    var tiles = grid.querySelectorAll('.tile');
-    tiles.forEach(function (tile) {
-      var idx = Number(tile.dataset.index);
-      if (revealedSet[idx]) {
-        tile.classList.add('revealed');
-      } else {
-        tile.classList.remove('revealed');
-      }
+  // ---- Slide management ----
+  socket.on('host:addSlide', guard((slide) => {
+    state.slides.push({
+      img: slide.img || '',
+      q1: slide.q1 || '',
+      q2: slide.q2 || '',
+      q3: slide.q3 || ''
     });
-  }
+    broadcast();
+  }));
 
-  function effectiveTimerRunning(s) {
-    return pendingOverride !== null ? pendingOverride : s.timerRunning;
-  }
-
-  function renderStopResumeButton(s) {
-    var running = effectiveTimerRunning(s);
-    var disabled = !s.gameStarted || s.gameOver || s.tilesRevealed >= s.totalTiles;
-    stopResumeBtn.disabled = disabled || stopResumeInFlight;
-    if (!stopResumeInFlight) {
-      stopResumeBtn.textContent = running ? '⏸ Stop Timer' : '▶ Resume Timer';
+  socket.on('host:updateSlide', guard(({ i, slide }) => {
+    if (state.slides[i]) {
+      state.slides[i] = { ...state.slides[i], ...slide };
+      broadcast();
     }
-  }
+  }));
 
-  function pollState() {
-    return fetch('/api/state')
-      .then(function (res) { return res.json(); })
-      .then(function (s) {
-        latestState = s;
-
-        if (pendingOverride !== null) {
-          if (s.timerRunning === pendingOverride) {
-            // Server confirmed our optimistic guess - drop the override.
-            pendingOverride = null;
-          } else if (Date.now() - pendingOverrideSetAt > OVERRIDE_SAFETY_TIMEOUT_MS) {
-            // Safety net: never let a stuck/incorrect guess override the
-            // real server truth forever (e.g. if a request silently failed).
-            pendingOverride = null;
-          }
-        }
-
-        if (s.gameOver) {
-          waitingScreen.style.display = 'none';
-          gameScreen.style.display = 'none';
-          gameOverScreen.style.display = 'block';
-          return;
-        }
-        if (!s.gameStarted) {
-          waitingScreen.style.display = 'block';
-          gameScreen.style.display = 'none';
-          gameOverScreen.style.display = 'none';
-          return;
-        }
-
-        waitingScreen.style.display = 'none';
-        gameOverScreen.style.display = 'none';
-        gameScreen.style.display = 'block';
-
-        if (builtForIndex !== s.currentIndex) {
-          buildGrid();
-          builtForIndex = s.currentIndex;
-          pendingOverride = null;
-        }
-
-        questionBadge.textContent = 'Question ' + (s.currentIndex + 1) + ' / ' + s.totalQuestions;
-        questionText.textContent = s.currentQuestion.questionText || '';
-        sharpLayer.style.backgroundImage = s.currentQuestion.image ? ('url(' + s.currentQuestion.image + ')') : 'none';
-
-        applyRevealed(s.tilesRevealed, s.revealOrder);
-        statusEl.textContent = 'Revealed ' + s.tilesRevealed + ' / ' + s.totalTiles + ' tiles';
-
-        var running = effectiveTimerRunning(s);
-        if (s.tilesRevealed >= s.totalTiles) {
-          countdownEl.textContent = 'Fully revealed';
-        } else if (running) {
-          var secs = (s.secondsToNextTile !== null && s.secondsToNextTile !== undefined) ? s.secondsToNextTile : s.secondsPerTile;
-          countdownEl.textContent = 'Next tile in: ' + secs + 's';
-        } else {
-          countdownEl.textContent = 'Paused';
-        }
-
-        renderStopResumeButton(s);
-      }).catch(function () {});
-  }
-
-  stopResumeBtn.addEventListener('click', function () {
-    if (stopResumeInFlight || !latestState) return;
-    var currentlyRunning = effectiveTimerRunning(latestState);
-    var action = currentlyRunning ? 'stop' : 'resume';
-
-    pendingOverride = (action === 'resume');
-    pendingOverrideSetAt = Date.now();
-    stopResumeInFlight = true;
-    stopResumeBtn.textContent = action === 'stop' ? '⏸ Stop Timer' : '▶ Resume Timer';
-    if (action === 'stop') { countdownEl.textContent = 'Paused'; }
-    renderStopResumeButton(latestState);
-
-    fetch('/api/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-      .then(function (res) {
-        if (!res.ok) { throw new Error('request failed'); }
-      })
-      .catch(function () {
-        pendingOverride = (action === 'resume') ? false : true;
-      })
-      .then(function () {
-        stopResumeInFlight = false;
-        pollState();
-      });
-  });
-
-  nextBtn.addEventListener('click', function () {
-    if (nextInFlight) return;
-    nextInFlight = true;
-    nextBtn.disabled = true;
-    pendingOverride = null;
-    fetch('/api/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-      .then(function () { return pollState(); })
-      .then(function () {
-        nextInFlight = false;
-        nextBtn.disabled = false;
-      });
-  });
-
-  pollState();
-  setInterval(pollState, 1000);
-</script>
-</body>
-</html>`;
-
-/* =========================================================================
-   SERVER / ROUTING
-   ========================================================================= */
-const server = http.createServer((req, res) => {
-  const parsed = url.parse(req.url, true);
-  const pathname = parsed.pathname;
-
-  // ---------- PAGE ROUTES ----------
-  if (req.method === 'GET' && (pathname === '/' || pathname === '/index' || pathname === '/index.html')) {
-    return sendHTML(res, INDEX_HTML);
-  }
-  if (req.method === 'GET' && (pathname === '/host' || pathname === '/host.html')) {
-    return sendHTML(res, HOST_HTML);
-  }
-  if (req.method === 'GET' && (pathname === '/user' || pathname === '/user.html')) {
-    return sendHTML(res, USER_HTML);
-  }
-
-  // ---------- API ROUTES ----------
-  if (pathname === '/api/state' && req.method === 'GET') {
-    return sendJSON(res, 200, publicState());
-  }
-
-  if (pathname === '/api/host/verify' && req.method === 'POST') {
-    return readJSONBody(req, (err, body) => {
-      if (err) return sendJSON(res, 400, { ok: false, error: 'Bad request' });
-      const ok = body.password === HOST_PASSWORD;
-      return sendJSON(res, 200, { ok });
-    });
-  }
-
-  if (pathname === '/api/host/questions' && req.method === 'GET') {
-    const password = parsed.query.password;
-    if (password !== HOST_PASSWORD) return sendJSON(res, 401, { ok: false, error: 'Unauthorized' });
-    return sendJSON(res, 200, { ok: true, questions: state.questions });
-  }
-
-  if (pathname === '/api/host/question' && req.method === 'POST') {
-    return readJSONBody(req, (err, body) => {
-      if (err) return sendJSON(res, 413, { ok: false, error: 'Payload too large or invalid' });
-      if (body.password !== HOST_PASSWORD) return sendJSON(res, 401, { ok: false, error: 'Unauthorized' });
-      const idx = Number(body.index);
-      if (!Number.isInteger(idx) || idx < 0 || idx >= TOTAL_QUESTIONS) {
-        return sendJSON(res, 400, { ok: false, error: 'Invalid question index' });
-      }
-      if (typeof body.image === 'string' && body.image.length > 0) {
-        state.questions[idx].image = body.image;
-      }
-      if (typeof body.questionText === 'string') {
-        state.questions[idx].questionText = body.questionText;
-      }
-      return sendJSON(res, 200, { ok: true });
-    });
-  }
-
-  if (pathname === '/api/host/start' && req.method === 'POST') {
-    return readJSONBody(req, (err, body) => {
-      if (err || body.password !== HOST_PASSWORD) return sendJSON(res, 401, { ok: false, error: 'Unauthorized' });
-      state.gameStarted = true;
-      state.gameOver = false;
-      state.currentIndex = 0;
-      startNewQuestionReveal();
-      state.timerRunning = true;
-      return sendJSON(res, 200, { ok: true });
-    });
-  }
-
-  if (pathname === '/api/host/reset' && req.method === 'POST') {
-    return readJSONBody(req, (err, body) => {
-      if (err || body.password !== HOST_PASSWORD) return sendJSON(res, 401, { ok: false, error: 'Unauthorized' });
-      state.gameStarted = false;
-      state.gameOver = false;
-      state.currentIndex = 0;
-      startNewQuestionReveal();
-      state.timerRunning = false;
-      if (body.clearQuestions) state.questions = freshQuestions();
-      return sendJSON(res, 200, { ok: true });
-    });
-  }
-
-  // Stop/Resume timer - called from the USER (player) page, no password required.
-  if (pathname === '/api/stop' && req.method === 'POST') {
-    state.timerRunning = false;
-    return sendJSON(res, 200, { ok: true });
-  }
-
-  if (pathname === '/api/resume' && req.method === 'POST') {
-    if (state.gameStarted && !state.gameOver && state.tilesRevealed < state.totalTiles) {
-      state.timerRunning = true;
+  socket.on('host:deleteSlide', guard((i) => {
+    if (state.slides[i]) {
+      state.slides.splice(i, 1);
+      if (state.index >= state.slides.length) state.index = Math.max(0, state.slides.length - 1);
+      state.revealed = false;
+      stopCountdown();
+      broadcast();
     }
-    return sendJSON(res, 200, { ok: true });
+  }));
+
+  socket.on('host:goto', guard((i) => {
+    if (i >= 0 && i < state.slides.length) {
+      state.index = i;
+      state.revealed = false;
+      stopCountdown();
+      broadcast();
+    }
+  }));
+
+  socket.on('host:next', guard(() => {
+    if (state.index < state.slides.length - 1) {
+      state.index++;
+      state.revealed = false;
+      stopCountdown();
+      broadcast();
+    }
+  }));
+
+  socket.on('host:prev', guard(() => {
+    if (state.index > 0) {
+      state.index--;
+      state.revealed = false;
+      stopCountdown();
+      broadcast();
+    }
+  }));
+
+  // ---- Countdown / reveal ----
+  // Countdown is driven by a server timestamp; clients compute remaining locally
+  // to avoid per-second network delay.
+  socket.on('host:countdownStart', guard((duration) => {
+    state.countdown = {
+      running: true,
+      startAt: Date.now(),
+      duration: duration || 5,
+      paused: false,
+      pausedRemaining: 0
+    };
+    state.revealed = false; // image hidden during the count; revealed on Start
+    broadcast();
+  }));
+
+  socket.on('host:start', guard(() => {
+    // reveal the image immediately
+    state.revealed = true;
+    stopCountdown();
+    broadcast();
+  }));
+
+  socket.on('host:pause', guard(() => {
+    const c = state.countdown;
+    if (c.running && !c.paused) {
+      const elapsed = (Date.now() - c.startAt) / 1000;
+      c.pausedRemaining = Math.max(0, c.duration - elapsed);
+      c.paused = true;
+    } else if (c.running && c.paused) {
+      // resume
+      c.startAt = Date.now() - (c.duration - c.pausedRemaining) * 1000;
+      c.paused = false;
+    }
+    broadcast();
+  }));
+
+  function stopCountdown() {
+    state.countdown = { running: false, startAt: 0, duration: state.countdown.duration || 5, paused: false, pausedRemaining: 0 };
   }
 
-  // Next question - callable by BOTH Host and User (no password required)
-  if (pathname === '/api/next' && req.method === 'POST') {
-    if (!state.gameStarted || state.gameOver) {
-      return sendJSON(res, 200, { ok: true }); // no-op
-    }
-    if (state.currentIndex < state.totalQuestions - 1) {
-      state.currentIndex++;
-      startNewQuestionReveal();
-      state.timerRunning = true;
-    } else {
-      state.gameOver = true;
-      state.timerRunning = false;
-    }
-    return sendJSON(res, 200, { ok: true });
-  }
+  // ---- Reset variants ----
+  // Reset Match: keep slides + questions, restart progress (index 0, hide image)
+  socket.on('host:resetMatch', guard(() => {
+    state.index = 0;
+    state.revealed = false;
+    stopCountdown();
+    broadcast();
+  }));
 
-  res.writeHead(404, { 'Content-Type': 'text/plain' });
-  res.end('Not found');
+  // Restart Game (NEW): everything stays, just start a fresh round from the beginning
+  socket.on('host:restartGame', guard(() => {
+    state.index = 0;
+    state.revealed = false;
+    stopCountdown();
+    io.to('users').emit('flash', 'เริ่มเกมใหม่!');
+    broadcast();
+  }));
+
+  // Reset All: wipe everything
+  socket.on('host:resetAll', guard(() => {
+    state = freshState();
+    broadcast();
+  }));
 });
 
-server.listen(PORT, () => {
-  console.log(`Guess the Picture server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log('Guest Picture running on port ' + PORT));

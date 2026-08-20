@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Guest Picture</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  :root { --neon:#00e5ff; --neon2:#ff2bd6; }
+  * { box-sizing: border-box; margin:0; padding:0; }
+  html, body { height:100%; overflow:hidden; }
+  body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background:#05060f; color:#fff;
+    height:100vh; height:100dvh;
+    display:flex; flex-direction:column;
+  }
+
+  /* Host access button (top-right, subtle) */
+  .host-link {
+    position:fixed; top:10px; right:12px; z-index:50;
+    font-size:12px; color:#7f8cff; text-decoration:none;
+    border:1px solid #2a2f55; padding:4px 10px; border-radius:20px;
+    background:rgba(10,12,30,.6); backdrop-filter:blur(4px);
+  }
+  .host-link:hover { color:var(--neon); border-color:var(--neon); }
+
+  /* ===== Stage: everything fits in one viewport, no scroll ===== */
+  .stage {
+    flex:1; display:flex; flex-direction:column;
+    padding:12px; gap:10px; min-height:0;
+  }
+
+  /* Image area = big */
+  .image-wrap {
+    position:relative; flex:1; min-height:0;
+    display:flex; align-items:center; justify-content:center;
+    border-radius:18px; overflow:hidden;
+    background:radial-gradient(circle at 50% 30%, #101636, #05060f 70%);
+    border:1px solid #1c2350;
+    box-shadow:0 0 40px rgba(0,229,255,.15) inset;
+  }
+  .image-wrap img {
+    max-width:100%; max-height:100%; object-fit:contain;
+    border-radius:12px;
+  }
+  .placeholder {
+    font-size:clamp(40px, 12vw, 140px); font-weight:800; letter-spacing:4px;
+    color:#20264f; text-shadow:0 0 30px rgba(0,229,255,.2);
+  }
+  .waiting { font-size:clamp(16px,3vw,26px); color:#5a63a0; text-align:center; padding:20px; }
+
+  /* Countdown number overlaid on the image (same screen, no scroll) */
+  .countdown {
+    position:absolute; inset:0; display:none;
+    align-items:center; justify-content:center; z-index:20;
+    background:rgba(3,4,12,.55); backdrop-filter:blur(2px);
+  }
+  .countdown.show { display:flex; }
+  .countdown .num {
+    font-size:clamp(120px, 40vh, 420px); font-weight:900; line-height:1;
+    color:#fff; text-shadow:0 0 40px var(--neon), 0 0 80px var(--neon2);
+    animation:pop .9s ease-out;
+  }
+  @keyframes pop { 0%{transform:scale(.4);opacity:.2} 40%{transform:scale(1.15);opacity:1} 100%{transform:scale(1)} }
+  .countdown .go { color:#39ff88; text-shadow:0 0 40px #39ff88,0 0 90px #39ff88; }
+
+  /* Question = 3 lines, small text, flags in front */
+  .question {
+    flex:0 0 auto;
+    display:flex; flex-direction:column; gap:6px;
+    padding:10px 16px; border-radius:14px;
+    background:rgba(12,16,38,.75); border:1px solid #1c2350;
+  }
+  .q-line {
+    display:flex; align-items:center; gap:12px;
+    font-size:clamp(14px, 2.2vw, 22px);
+    min-height:1.4em;
+  }
+  .q-line .flag { font-size:clamp(20px, 3vw, 30px); flex:0 0 auto; width:1.4em; text-align:center; }
+  .q-line .txt { color:#e8ecff; }
+  .q-line.empty .txt { color:#3a4170; }
+
+  .flash {
+    position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+    z-index:80; background:rgba(3,4,12,.7);
+  }
+  .flash.show { display:flex; animation:fade 1.6s forwards; }
+  .flash span { font-size:clamp(30px,8vw,90px); font-weight:900; color:var(--neon);
+    text-shadow:0 0 40px var(--neon2); }
+  @keyframes fade { 0%{opacity:0} 15%{opacity:1} 80%{opacity:1} 100%{opacity:0} }
+</style>
+</head>
+<body>
+  <a class="host-link" href="/host.html">🔒 Host</a>
+
+  <div class="stage">
+    <div class="image-wrap">
+      <div id="placeholder" class="placeholder">?</div>
+      <img id="pic" style="display:none" />
+      <div id="countdown" class="countdown"><div id="cd-num" class="num"></div></div>
+    </div>
+
+    <div class="question">
+      <div class="q-line empty" id="line1"><span class="flag">🇹🇭</span><span class="txt" id="t1"></span></div>
+      <div class="q-line empty" id="line2"><span class="flag">🇺🇸</span><span class="txt" id="t2"></span></div>
+      <div class="q-line empty" id="line3"><span class="flag">🇯🇵</span><span class="txt" id="t3"></span></div>
+    </div>
+  </div>
+
+  <div class="flash" id="flash"><span id="flashText"></span></div>
+
+<script>
+  const socket = io();
+  socket.on('connect', () => socket.emit('join:user'));
+
+  const pic = document.getElementById('pic');
+  const placeholder = document.getElementById('placeholder');
+  const cd = document.getElementById('countdown');
+  const cdNum = document.getElementById('cd-num');
+
+  let cdTimer = null;
+
+  function setLine(id, txtId, text) {
+    const line = document.getElementById(id);
+    const txt = document.getElementById(txtId);
+    txt.textContent = text || '';
+    line.classList.toggle('empty', !text);
+  }
+
+  function render(s) {
+    // image
+    if (s.current && s.current.img && s.revealed) {
+      pic.src = s.current.img;
+      pic.style.display = 'block';
+      placeholder.style.display = 'none';
+    } else {
+      pic.style.display = 'none';
+      placeholder.style.display = 'block';
+    }
+    // questions (3 lines with flags)
+    if (s.current) {
+      setLine('line1','t1', s.current.q1);
+      setLine('line2','t2', s.current.q2);
+      setLine('line3','t3', s.current.q3);
+    } else {
+      setLine('line1','t1',''); setLine('line2','t2',''); setLine('line3','t3','');
+    }
+    // countdown
+    handleCountdown(s.countdown);
+  }
+
+  function handleCountdown(c) {
+    if (cdTimer) { clearInterval(cdTimer); cdTimer = null; }
+    if (!c || !c.running) { cd.classList.remove('show'); return; }
+    cd.classList.add('show');
+
+    const tick = () => {
+      let remaining;
+      if (c.paused) {
+        remaining = c.pausedRemaining;
+      } else {
+        const elapsed = (Date.now() - c.startAt) / 1000;
+        remaining = c.duration - elapsed;
+      }
+      if (remaining <= 0.05) {
+        cdNum.textContent = 'GO!';
+        cdNum.classList.add('go');
+        clearInterval(cdTimer); cdTimer = null;
+        return;
+      }
+      cdNum.classList.remove('go');
+      const shown = Math.ceil(remaining);
+      if (cdNum.textContent !== String(shown)) {
+        cdNum.textContent = shown;
+        cdNum.style.animation = 'none';
+        void cdNum.offsetWidth;
+        cdNum.style.animation = 'pop .9s ease-out';
+      }
+    };
+    tick();
+    if (!c.paused) cdTimer = setInterval(tick, 100);
+  }
+
+  socket.on('state', render);
+  socket.on('flash', (msg) => {
+    const f = document.getElementById('flash');
+    document.getElementById('flashText').textContent = msg;
+    f.classList.remove('show'); void f.offsetWidth; f.classList.add('show');
+    setTimeout(() => f.classList.remove('show'), 1700);
+  });
+</script>
+</body>
+</html>

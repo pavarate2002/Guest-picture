@@ -1,12 +1,16 @@
 {
-  "name": "guess-picture-game",
-  "version": "3.4.0",
-  "description": "Guess the Picture - single-file Host & Player game server",
+  "name": "guest-picture",
+  "version": "2.0.0",
+  "description": "Transformation Night - Guest Picture game (Host/User real-time)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
   }
 }
