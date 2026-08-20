@@ -532,7 +532,10 @@ ${STYLE_BLOCK}
 
 /* =========================================================================
    PAGE: Player page
-   (Pause/Resume control now lives here instead of the Host dashboard)
+   (Pause/Resume control lives here instead of the Host dashboard.
+    Uses an OPTIMISTIC UI update on click so the button/countdown reacts
+    INSTANTLY, instead of waiting for a full network round-trip before
+    showing any visual feedback - this removes the perceived "delay".)
    ========================================================================= */
 const USER_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -587,7 +590,13 @@ ${STYLE_BLOCK}
 
   let builtForIndex = -1;
   let latestState = null;
-  let requestInFlight = false; // prevents overlapping stop/resume/next clicks
+  // "pendingOverride" holds an optimistic guess of timerRunning right after a
+  // click, so the UI shows the correct state INSTANTLY, before the server
+  // has even responded. It gets cleared as soon as a poll confirms the truth
+  // (or reverted if the request ultimately failed).
+  let pendingOverride = null;
+  let stopResumeInFlight = false;
+  let nextInFlight = false;
 
   function buildGrid() {
     grid.innerHTML = '';
@@ -616,11 +625,18 @@ ${STYLE_BLOCK}
     });
   }
 
+  function effectiveTimerRunning(s) {
+    // Trust the optimistic override until the server confirms/refutes it.
+    return pendingOverride !== null ? pendingOverride : s.timerRunning;
+  }
+
   function renderStopResumeButton(s) {
-    if (requestInFlight) return;
+    const running = effectiveTimerRunning(s);
     const disabled = !s.gameStarted || s.gameOver || s.tilesRevealed >= s.totalTiles;
-    stopResumeBtn.disabled = disabled;
-    stopResumeBtn.textContent = s.timerRunning ? '⏸ Stop Timer' : '▶ Resume Timer';
+    stopResumeBtn.disabled = disabled || stopResumeInFlight;
+    if (!stopResumeInFlight) {
+      stopResumeBtn.textContent = running ? '⏸ Stop Timer' : '▶ Resume Timer';
+    }
   }
 
   async function pollState() {
@@ -628,6 +644,12 @@ ${STYLE_BLOCK}
       const res = await fetch('/api/state');
       const s = await res.json();
       latestState = s;
+
+      // Once the server's real timerRunning matches what we optimistically
+      // predicted, we can drop the override and just trust the server again.
+      if (pendingOverride !== null && s.timerRunning === pendingOverride) {
+        pendingOverride = null;
+      }
 
       if (s.gameOver) {
         waitingScreen.style.display = 'none';
@@ -649,6 +671,7 @@ ${STYLE_BLOCK}
       if (builtForIndex !== s.currentIndex) {
         buildGrid();
         builtForIndex = s.currentIndex;
+        pendingOverride = null; // new question - drop any stale override
       }
 
       questionBadge.textContent = \`Question \${s.currentIndex + 1} / \${s.totalQuestions}\`;
@@ -658,10 +681,11 @@ ${STYLE_BLOCK}
       applyRevealed(s.tilesRevealed, s.revealOrder);
       statusEl.textContent = \`Revealed \${s.tilesRevealed} / \${s.totalTiles} tiles\`;
 
+      const running = effectiveTimerRunning(s);
       if (s.tilesRevealed >= s.totalTiles) {
         countdownEl.textContent = '✅ Fully revealed';
-      } else if (s.timerRunning) {
-        countdownEl.textContent = \`Next tile in: \${s.secondsToNextTile}s\`;
+      } else if (running) {
+        countdownEl.textContent = \`Next tile in: \${s.secondsToNextTile !== null ? s.secondsToNextTile : s.secondsPerTile}s\`;
       } else {
         countdownEl.textContent = '⏸ Paused';
       }
@@ -671,33 +695,45 @@ ${STYLE_BLOCK}
   }
 
   stopResumeBtn.addEventListener('click', async () => {
-    if (requestInFlight || !latestState) return;
-    // Decide action from the LATEST KNOWN server state, not from button text,
-    // so a stale UI can never send the wrong command.
-    const action = latestState.timerRunning ? 'stop' : 'resume';
-    requestInFlight = true;
-    stopResumeBtn.disabled = true;
-    stopResumeBtn.textContent = action === 'stop' ? 'Stopping...' : 'Resuming...';
-    try {
-      await fetch(\`/api/\${action}\`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    } catch (e) { /* ignore, poll will resync */ }
-    await pollState();
-    requestInFlight = false;
+    if (stopResumeInFlight || !latestState) return;
+    const currentlyRunning = effectiveTimerRunning(latestState);
+    const action = currentlyRunning ? 'stop' : 'resume';
+
+    // 1) INSTANT optimistic UI update - no waiting on the network at all.
+    pendingOverride = (action === 'resume');
+    stopResumeInFlight = true;
+    stopResumeBtn.textContent = action === 'stop' ? '⏸ Stop Timer' : '▶ Resume Timer';
+    countdownEl.textContent = action === 'stop' ? '⏸ Paused' : countdownEl.textContent;
     renderStopResumeButton(latestState);
+
+    // 2) Fire the request in the background; don't block the UI on it.
+    try {
+      const res = await fetch(\`/api/\${action}\`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (!res.ok) throw new Error('request failed');
+    } catch (e) {
+      // Revert the optimistic guess if the request actually failed.
+      pendingOverride = (action === 'resume') ? false : true;
+    }
+    stopResumeInFlight = false;
+    // 3) Quick background resync to confirm server truth (does not block UI).
+    pollState();
   });
 
   nextBtn.addEventListener('click', async () => {
-    if (requestInFlight) return;
-    requestInFlight = true;
+    if (nextInFlight) return;
+    nextInFlight = true;
     nextBtn.disabled = true;
-    await fetch('/api/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    pendingOverride = null;
+    try {
+      await fetch('/api/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    } catch (e) { /* ignore, poll will resync */ }
     await pollState();
-    requestInFlight = false;
+    nextInFlight = false;
     nextBtn.disabled = false;
   });
 
   pollState();
-  setInterval(pollState, 1000);
+  setInterval(pollState, 500);
 </script>
 </body>
 </html>`;
@@ -782,7 +818,7 @@ const server = http.createServer((req, res) => {
     });
   }
 
-  // Stop/Resume timer - now called from the USER (player) page, no password required.
+  // Stop/Resume timer - called from the USER (player) page, no password required.
   if (pathname === '/api/stop' && req.method === 'POST') {
     state.timerRunning = false;
     return sendJSON(res, 200, { ok: true });
