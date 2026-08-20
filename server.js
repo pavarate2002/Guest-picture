@@ -1,7 +1,10 @@
 // ============================================================
-//  Transformation Night · Guest Picture  (v3)
-//  Single-file server: serves User page (/) and Host page (/host)
-//  CSS flags (work on Windows), real-time via Socket.io
+//  Transformation Night · GUEST PICTURE  (v4)
+//  Single-file server: User page (/) + Host page (/host)
+//  - CSS flags (render on Windows)
+//  - LED 4x4 cover tiles: on Countdown, tiles randomly open every 5s
+//  - LED neon game title on User page
+//  Real-time via Socket.io
 // ============================================================
 const express = require('express');
 const http = require('http');
@@ -13,27 +16,55 @@ const io = new Server(server, { maxHttpBufferSize: 1e8 }); // 100MB for images
 
 const HOST_CODE = 'pqc';
 const PORT = process.env.PORT || 3000;
+const TILE_COUNT = 16;          // 4 x 4
+const TILE_INTERVAL = 5000;     // reveal one tile every 5 seconds
 
 // ---------- Game state ----------
 function freshState() {
   return {
-    slides: [],   // [{ img, q1, q2, q3 }]
+    slides: [],        // [{ img, q1, q2, q3 }]
     index: 0,
-    revealed: false,
-    countdown: { running: false, startAt: 0, duration: 5, paused: false, pausedRemaining: 0 }
+    phase: 'idle',     // 'idle' | 'tiles' | 'full'
+    reveal: null       // { order:[], revealedCount, paused, nextAt, pausedRemaining }
   };
 }
 let state = freshState();
+let tileTimer = null;
+
+function clearTileTimer() { if (tileTimer) { clearInterval(tileTimer); tileTimer = null; } }
+
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// which tiles are currently open (true = image visible)
+function openTilesArray() {
+  const arr = new Array(TILE_COUNT).fill(false);
+  if (state.phase === 'full') return arr.fill(true);
+  if (state.phase === 'tiles' && state.reveal) {
+    for (let i = 0; i < state.reveal.revealedCount; i++) arr[state.reveal.order[i]] = true;
+  }
+  return arr;
+}
 
 function publicState(forHost) {
   const cur = state.slides[state.index] || null;
+  const showImg = (state.phase !== 'idle') || forHost;
   return {
     total: state.slides.length,
     index: state.index,
-    revealed: state.revealed,
-    countdown: state.countdown,
+    phase: state.phase,
+    tilesOpen: openTilesArray(),
+    revealedCount: state.reveal ? state.reveal.revealedCount : 0,
+    tileCount: TILE_COUNT,
+    revealPaused: state.reveal ? state.reveal.paused : false,
+    revealActive: state.phase === 'tiles',
     current: cur ? {
-      img: (state.revealed || forHost) ? cur.img : null,
+      img: showImg ? cur.img : null,
       q1: cur.q1, q2: cur.q2, q3: cur.q3
     } : null,
     slides: forHost ? state.slides.map(s => ({ q1: s.q1, q2: s.q2, q3: s.q3, hasImg: !!s.img })) : undefined
@@ -43,9 +74,34 @@ function broadcast() {
   io.to('hosts').emit('state', publicState(true));
   io.to('users').emit('state', publicState(false));
 }
-function stopCountdown() {
-  state.countdown = { running: false, startAt: 0, duration: state.countdown.duration || 5, paused: false, pausedRemaining: 0 };
+
+// ---------- Tile reveal engine ----------
+function startTiles() {
+  clearTileTimer();
+  state.phase = 'tiles';
+  state.reveal = {
+    order: shuffle([...Array(TILE_COUNT).keys()]),
+    revealedCount: 0,
+    paused: false,
+    nextAt: Date.now() + TILE_INTERVAL,
+    pausedRemaining: 0
+  };
+  broadcast();
+  tileTimer = setInterval(() => {
+    const r = state.reveal;
+    if (!r || state.phase !== 'tiles') { clearTileTimer(); return; }
+    if (r.paused) return;
+    if (Date.now() >= r.nextAt) {
+      if (r.revealedCount < TILE_COUNT) {
+        r.revealedCount++;
+        r.nextAt = Date.now() + TILE_INTERVAL;
+        broadcast();
+      }
+      if (r.revealedCount >= TILE_COUNT) { clearTileTimer(); }
+    }
+  }, 200);
 }
+function stopReveal() { clearTileTimer(); state.reveal = null; }
 
 // ---------- Socket ----------
 io.on('connection', (socket) => {
@@ -63,66 +119,64 @@ io.on('connection', (socket) => {
 
   const guard = (fn) => (...a) => { if (socket.isHost) fn(...a); };
 
+  // slide management
   socket.on('host:addSlide', guard((s) => {
     state.slides.push({ img: s.img || '', q1: s.q1 || '', q2: s.q2 || '', q3: s.q3 || '' });
     broadcast();
-  }));
-  socket.on('host:updateSlide', guard(({ i, slide }) => {
-    if (state.slides[i]) { state.slides[i] = { ...state.slides[i], ...slide }; broadcast(); }
   }));
   socket.on('host:deleteSlide', guard((i) => {
     if (state.slides[i]) {
       state.slides.splice(i, 1);
       if (state.index >= state.slides.length) state.index = Math.max(0, state.slides.length - 1);
-      state.revealed = false; stopCountdown(); broadcast();
+      state.phase = 'idle'; stopReveal(); broadcast();
     }
   }));
   socket.on('host:goto', guard((i) => {
-    if (i >= 0 && i < state.slides.length) { state.index = i; state.revealed = false; stopCountdown(); broadcast(); }
+    if (i >= 0 && i < state.slides.length) { state.index = i; state.phase = 'idle'; stopReveal(); broadcast(); }
   }));
   socket.on('host:next', guard(() => {
-    if (state.index < state.slides.length - 1) { state.index++; state.revealed = false; stopCountdown(); broadcast(); }
+    if (state.index < state.slides.length - 1) { state.index++; state.phase = 'idle'; stopReveal(); broadcast(); }
   }));
   socket.on('host:prev', guard(() => {
-    if (state.index > 0) { state.index--; state.revealed = false; stopCountdown(); broadcast(); }
+    if (state.index > 0) { state.index--; state.phase = 'idle'; stopReveal(); broadcast(); }
   }));
 
-  // countdown / reveal
-  socket.on('host:countdownStart', guard((dur) => {
-    state.countdown = { running: true, startAt: Date.now(), duration: dur || 5, paused: false, pausedRemaining: 0 };
-    state.revealed = false; broadcast();
-  }));
-  socket.on('host:start', guard(() => { state.revealed = true; stopCountdown(); broadcast(); }));
+  // countdown = start tile reveal (one random tile every 5s)
+  socket.on('host:countdownStart', guard(() => { startTiles(); }));
+
+  // start = reveal whole picture immediately
+  socket.on('host:start', guard(() => { state.phase = 'full'; clearTileTimer(); broadcast(); }));
+
+  // pause / resume the tile reveal
   socket.on('host:pause', guard(() => {
-    const c = state.countdown;
-    if (c.running && !c.paused) {
-      const elapsed = (Date.now() - c.startAt) / 1000;
-      c.pausedRemaining = Math.max(0, c.duration - elapsed); c.paused = true;
-    } else if (c.running && c.paused) {
-      c.startAt = Date.now() - (c.duration - c.pausedRemaining) * 1000; c.paused = false;
+    const r = state.reveal;
+    if (state.phase !== 'tiles' || !r) return;
+    if (!r.paused) {
+      r.pausedRemaining = Math.max(0, r.nextAt - Date.now());
+      r.paused = true;
+    } else {
+      r.nextAt = Date.now() + (r.pausedRemaining || TILE_INTERVAL);
+      r.paused = false;
     }
     broadcast();
   }));
 
   // resets
   socket.on('host:restartGame', guard(() => {
-    state.index = 0; state.revealed = false; stopCountdown();
+    state.index = 0; state.phase = 'idle'; stopReveal();
     io.to('users').emit('flash', 'เริ่มเกมใหม่!'); broadcast();
   }));
-  socket.on('host:resetMatch', guard(() => { state.index = 0; state.revealed = false; stopCountdown(); broadcast(); }));
-  socket.on('host:resetAll', guard(() => { state = freshState(); broadcast(); }));
+  socket.on('host:resetMatch', guard(() => { state.index = 0; state.phase = 'idle'; stopReveal(); broadcast(); }));
+  socket.on('host:resetAll', guard(() => { stopReveal(); state = freshState(); broadcast(); }));
 });
 
-// ---------- Shared CSS (flags drawn with CSS so they render on Windows) ----------
+// ---------- Shared CSS: flags drawn with CSS (render on Windows) ----------
 const FLAG_CSS = `
   .flag { display:inline-block; position:relative; overflow:hidden; flex:0 0 auto;
     border-radius:4px; box-shadow:0 0 0 1px rgba(255,255,255,.25); background:#fff; }
-  /* Thailand: red / white / blue(double) / white / red */
   .flag-th { background:linear-gradient(#A51931 0 16.66%, #fff 16.66% 33.33%, #2D2A4A 33.33% 66.66%, #fff 66.66% 83.33%, #A51931 83.33% 100%); }
-  /* Japan: white with red disc */
   .flag-jp { background:#fff; }
   .flag-jp::after { content:''; position:absolute; inset:0; margin:auto; width:52%; aspect-ratio:1; border-radius:50%; background:#BC002D; }
-  /* USA: 13 stripes + blue canton */
   .flag-us { background:repeating-linear-gradient(#B22234 0 7.69%, #fff 7.69% 15.38%); }
   .flag-us::before { content:''; position:absolute; top:0; left:0; width:42%; height:53.8%; background:#3C3B6E; }
 `;
@@ -135,35 +189,69 @@ const USER_HTML = `<!DOCTYPE html>
 <title>Guest Picture</title>
 <script src="/socket.io/socket.io.js"></script>
 <style>
-  :root { --neon:#00e5ff; --neon2:#ff2bd6; }
+  :root { --neon:#00e5ff; --neon2:#ff2bd6; --neon3:#7d5bff; }
   * { box-sizing:border-box; margin:0; padding:0; }
   html,body { height:100%; overflow:hidden; }
-  body { font-family:'Segoe UI',Tahoma,sans-serif; background:#05060f; color:#fff;
-    height:100vh; height:100dvh; display:flex; flex-direction:column; }
-  .host-link { position:fixed; top:10px; right:12px; z-index:50; font-size:12px; color:#7f8cff;
+  body { font-family:'Segoe UI',Tahoma,sans-serif; background:#04040c; color:#fff;
+    height:100vh; height:100dvh; display:flex; flex-direction:column;
+    background-image:radial-gradient(circle at 20% 0%, rgba(125,91,255,.15), transparent 40%),
+                     radial-gradient(circle at 80% 100%, rgba(255,43,214,.12), transparent 40%); }
+  .host-link { position:fixed; top:10px; right:12px; z-index:60; font-size:12px; color:#7f8cff;
     text-decoration:none; border:1px solid #2a2f55; padding:4px 10px; border-radius:20px;
     background:rgba(10,12,30,.6); }
   .host-link:hover { color:var(--neon); border-color:var(--neon); }
-  .stage { flex:1; display:flex; flex-direction:column; padding:12px; gap:10px; min-height:0; }
+
+  /* ---- LED TITLE ---- */
+  .title-bar { flex:0 0 auto; text-align:center; padding:8px 10px 2px; }
+  .led-title { display:inline-block; font-weight:900; letter-spacing:6px;
+    font-size:clamp(22px, 4.4vw, 46px);
+    background:linear-gradient(90deg,#00e5ff,#7d5bff,#ff2bd6,#00e5ff);
+    background-size:300% 100%; -webkit-background-clip:text; background-clip:text; color:transparent;
+    animation:hue 6s linear infinite, flicker 4s infinite;
+    text-shadow:0 0 18px rgba(0,229,255,.35); }
+  .led-title .dot { color:#ff2bd6; -webkit-text-fill-color:#ff2bd6; animation:blink 1.1s steps(1) infinite; }
+  @keyframes hue { to { background-position:300% 0; } }
+  @keyframes blink { 50% { opacity:.15; } }
+  @keyframes flicker { 0%,19%,21%,23%,80%,100%{opacity:1} 20%,22%{opacity:.7} }
+  .subtitle { margin-top:2px; font-size:clamp(9px,1.4vw,12px); letter-spacing:4px; color:#5a63a0; text-transform:uppercase; }
+
+  .stage { flex:1; display:flex; flex-direction:column; padding:8px 12px 12px; gap:10px; min-height:0; }
   .image-wrap { position:relative; flex:1; min-height:0; display:flex; align-items:center; justify-content:center;
-    border-radius:18px; overflow:hidden; background:radial-gradient(circle at 50% 30%, #101636, #05060f 70%);
-    border:1px solid #1c2350; box-shadow:0 0 40px rgba(0,229,255,.15) inset; }
-  .image-wrap img { max-width:100%; max-height:100%; object-fit:contain; border-radius:12px; }
+    border-radius:18px; overflow:hidden; background:radial-gradient(circle at 50% 30%, #0c1030, #04040c 72%);
+    border:1px solid #1c2350; box-shadow:0 0 40px rgba(0,229,255,.15) inset, 0 0 30px rgba(125,91,255,.15); }
+  .image-wrap img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
   .placeholder { font-size:clamp(40px,12vw,140px); font-weight:800; letter-spacing:4px;
-    color:#20264f; text-shadow:0 0 30px rgba(0,229,255,.2); }
-  .countdown { position:absolute; inset:0; display:none; align-items:center; justify-content:center; z-index:20;
-    background:rgba(3,4,12,.55); backdrop-filter:blur(2px); }
-  .countdown.show { display:flex; }
-  .countdown .num { font-size:clamp(120px,40vh,420px); font-weight:900; line-height:1; color:#fff;
-    text-shadow:0 0 40px var(--neon),0 0 80px var(--neon2); animation:pop .9s ease-out; }
-  @keyframes pop { 0%{transform:scale(.4);opacity:.2} 40%{transform:scale(1.15);opacity:1} 100%{transform:scale(1)} }
-  .countdown .go { color:#39ff88; text-shadow:0 0 40px #39ff88,0 0 90px #39ff88; }
+    color:#20264f; text-shadow:0 0 30px rgba(0,229,255,.2); z-index:1; }
+
+  /* ---- LED tile grid overlay (4x4) ---- */
+  .tiles { position:absolute; inset:0; display:grid; z-index:5;
+    grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr); gap:5px; padding:5px;
+    pointer-events:none; }
+  .tiles.hidden { display:none; }
+  .tile { position:relative; border-radius:10px; overflow:hidden;
+    background:linear-gradient(135deg,#141a45,#0a0e26);
+    border:1px solid rgba(0,229,255,.35);
+    box-shadow:0 0 12px rgba(0,229,255,.25) inset, 0 0 10px rgba(125,91,255,.2);
+    transition:transform .55s cubic-bezier(.2,.8,.2,1), opacity .55s ease;
+    transform-style:preserve-3d; }
+  .tile::before { content:''; position:absolute; inset:0;
+    background:repeating-linear-gradient(45deg, rgba(0,229,255,.08) 0 8px, transparent 8px 16px);
+    animation:scan 3s linear infinite; }
+  .tile::after { content:''; position:absolute; inset:0; margin:auto; width:38%; height:38%; border-radius:50%;
+    background:radial-gradient(circle, rgba(0,229,255,.55), transparent 70%);
+    filter:blur(2px); animation:pulse 2.4s ease-in-out infinite; }
+  @keyframes scan { to { background-position:32px 0; } }
+  @keyframes pulse { 0%,100%{opacity:.35;transform:scale(.85)} 50%{opacity:.9;transform:scale(1.1)} }
+  .tile.open { transform:rotateY(90deg) scale(.4); opacity:0; }
+
   .question { flex:0 0 auto; display:flex; flex-direction:column; gap:8px; padding:12px 16px;
-    border-radius:14px; background:rgba(12,16,38,.75); border:1px solid #1c2350; }
+    border-radius:14px; background:rgba(12,16,38,.75); border:1px solid #1c2350;
+    box-shadow:0 0 24px rgba(125,91,255,.12); }
   .q-line { display:flex; align-items:center; gap:14px; font-size:clamp(14px,2.2vw,22px); min-height:1.5em; }
   .q-line .flag { width:clamp(30px,4vw,42px); height:clamp(20px,2.7vw,28px); }
   .q-line .txt { color:#e8ecff; }
   .q-line.empty .txt { color:#3a4170; }
+
   .flash { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:80;
     background:rgba(3,4,12,.7); }
   .flash.show { display:flex; }
@@ -172,11 +260,17 @@ const USER_HTML = `<!DOCTYPE html>
 </style></head>
 <body>
   <a class="host-link" href="/host">Host</a>
+
+  <div class="title-bar">
+    <div class="led-title">GUEST<span class="dot">·</span>PICTURE</div>
+    <div class="subtitle">Transformation Night</div>
+  </div>
+
   <div class="stage">
     <div class="image-wrap">
       <div id="placeholder" class="placeholder">?</div>
       <img id="pic" style="display:none"/>
-      <div id="countdown" class="countdown"><div id="cd-num" class="num"></div></div>
+      <div id="tiles" class="tiles hidden"></div>
     </div>
     <div class="question">
       <div class="q-line empty" id="line1"><span class="flag flag-th"></span><span class="txt" id="t1"></span></div>
@@ -184,48 +278,42 @@ const USER_HTML = `<!DOCTYPE html>
       <div class="q-line empty" id="line3"><span class="flag flag-jp"></span><span class="txt" id="t3"></span></div>
     </div>
   </div>
+
   <div class="flash" id="flash"><span id="flashText"></span></div>
 <script>
   var socket = io();
   socket.on('connect', function(){ socket.emit('join:user'); });
   var pic = document.getElementById('pic');
   var placeholder = document.getElementById('placeholder');
-  var cd = document.getElementById('countdown');
-  var cdNum = document.getElementById('cd-num');
-  var cdTimer = null;
+  var tilesEl = document.getElementById('tiles');
+
+  // build 16 tiles once
+  var TILE_N = 16, tileNodes = [];
+  for (var i=0;i<TILE_N;i++){ var d=document.createElement('div'); d.className='tile'; tilesEl.appendChild(d); tileNodes.push(d); }
+
   function setLine(lineId, txtId, text){
-    var line = document.getElementById(lineId), txt = document.getElementById(txtId);
-    txt.textContent = text || '';
-    if (text) line.classList.remove('empty'); else line.classList.add('empty');
+    var line=document.getElementById(lineId), txt=document.getElementById(txtId);
+    txt.textContent=text||'';
+    if(text) line.classList.remove('empty'); else line.classList.add('empty');
   }
   function render(s){
-    if (s.current && s.current.img && s.revealed){
-      pic.src = s.current.img; pic.style.display='block'; placeholder.style.display='none';
+    if (s.current && s.current.img){
+      pic.src=s.current.img; pic.style.display='block'; placeholder.style.display='none';
     } else { pic.style.display='none'; placeholder.style.display='block'; }
+
+    // tiles: show overlay only when a picture exists AND not fully revealed
+    var showTiles = !!(s.current && s.current.img) && s.phase !== 'full';
+    tilesEl.classList.toggle('hidden', !showTiles);
+    var open = s.tilesOpen || [];
+    for (var i=0;i<TILE_N;i++){ tileNodes[i].classList.toggle('open', !!open[i]); }
+
     if (s.current){ setLine('line1','t1',s.current.q1); setLine('line2','t2',s.current.q2); setLine('line3','t3',s.current.q3); }
     else { setLine('line1','t1',''); setLine('line2','t2',''); setLine('line3','t3',''); }
-    handleCountdown(s.countdown);
-  }
-  function handleCountdown(c){
-    if (cdTimer){ clearInterval(cdTimer); cdTimer=null; }
-    if (!c || !c.running){ cd.classList.remove('show'); return; }
-    cd.classList.add('show');
-    function tick(){
-      var remaining = c.paused ? c.pausedRemaining : (c.duration - (Date.now()-c.startAt)/1000);
-      if (remaining <= 0.05){ cdNum.textContent='GO!'; cdNum.classList.add('go'); clearInterval(cdTimer); cdTimer=null; return; }
-      cdNum.classList.remove('go');
-      var shown = Math.ceil(remaining);
-      if (cdNum.textContent !== String(shown)){
-        cdNum.textContent = shown; cdNum.style.animation='none'; void cdNum.offsetWidth; cdNum.style.animation='pop .9s ease-out';
-      }
-    }
-    tick();
-    if (!c.paused) cdTimer = setInterval(tick, 100);
   }
   socket.on('state', render);
   socket.on('flash', function(msg){
-    var f = document.getElementById('flash');
-    document.getElementById('flashText').textContent = msg;
+    var f=document.getElementById('flash');
+    document.getElementById('flashText').textContent=msg;
     f.classList.remove('show'); void f.offsetWidth; f.classList.add('show');
     setTimeout(function(){ f.classList.remove('show'); }, 1700);
   });
@@ -242,10 +330,10 @@ const HOST_HTML = `<!DOCTYPE html>
 <style>
   :root { --neon:#00e5ff; --neon2:#ff2bd6; --ok:#39ff88; --warn:#ffb020; --bad:#ff4d6d; }
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:'Segoe UI',Tahoma,sans-serif; background:#05060f; color:#e8ecff; padding:16px; }
+  body { font-family:'Segoe UI',Tahoma,sans-serif; background:#04040c; color:#e8ecff; padding:16px; }
   .login { max-width:340px; margin:16vh auto; text-align:center; background:#0b1030;
     border:1px solid #1c2350; border-radius:16px; padding:28px; }
-  input, textarea { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #2a2f55;
+  input { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #2a2f55;
     background:#0a0e26; color:#fff; font-size:15px; margin-bottom:10px; font-family:inherit; }
   input:focus { outline:none; border-color:var(--neon); }
   .err { color:var(--bad); font-size:13px; min-height:18px; }
@@ -254,7 +342,7 @@ const HOST_HTML = `<!DOCTYPE html>
   .card { background:#0b1030; border:1px solid #1c2350; border-radius:16px; padding:16px; }
   .card h3 { font-size:15px; margin-bottom:12px; color:var(--neon); }
   button { cursor:pointer; border:none; border-radius:10px; padding:10px 14px; font-size:14px;
-    font-weight:600; color:#05060f; transition:.15s; font-family:inherit; }
+    font-weight:600; color:#04040c; transition:.15s; font-family:inherit; }
   button:hover { transform:translateY(-1px); }
   .btn-add { background:var(--neon); width:100%; }
   .btn-nav { background:#2a2f55; color:#fff; }
@@ -270,7 +358,6 @@ const HOST_HTML = `<!DOCTYPE html>
   .sep { height:1px; background:#1c2350; margin:6px 0; }
   .status { font-size:13px; color:#8b93c9; margin-bottom:10px; line-height:1.6; }
   .status b { color:#fff; }
-  /* input rows with flags (Host) */
   .qrow { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
   .qrow .flag { width:32px; height:22px; }
   .qrow input { margin-bottom:0; }
@@ -280,7 +367,6 @@ const HOST_HTML = `<!DOCTYPE html>
   .slide-item { display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #1c2350;
     border-radius:10px; margin-bottom:6px; }
   .slide-item.active { border-color:var(--neon); background:rgba(0,229,255,.06); }
-  .slide-item img { width:52px; height:40px; object-fit:cover; border-radius:6px; background:#05060f; }
   .slide-item .meta { flex:1; font-size:12px; color:#b7bde8; overflow:hidden; }
   .slide-item .meta div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .slide-item .go { background:#2a2f55; color:#fff; padding:5px 9px; font-size:12px; }
@@ -310,7 +396,7 @@ const HOST_HTML = `<!DOCTYPE html>
         <div class="qrow"><span class="flag flag-us"></span><input id="q2" placeholder="Question (English)"/></div>
         <div class="qrow"><span class="flag flag-jp"></span><input id="q3" placeholder="質問 (日本語)"/></div>
         <button class="btn-add" onclick="addSlide()">เพิ่มลงเกม</button>
-        <div class="hint">รูปจะยังไม่โชว์ให้ผู้เล่นจนกว่าจะกด Start</div>
+        <div class="hint">กด Countdown แล้วแผ่นป้าย 4×4 จะสุ่มเปิดทีละแผ่นทุก 5 วินาที</div>
       </div>
       <div class="card" style="margin-top:16px">
         <h3>รายการโจทย์ทั้งหมด</h3>
@@ -330,8 +416,8 @@ const HOST_HTML = `<!DOCTYPE html>
             <button class="btn-nav" onclick="socket.emit('host:next')">ถัดไป ▶</button>
           </div>
           <div class="grid2">
-            <button class="btn-count" onclick="socket.emit('host:countdownStart',5)">Countdown Start (5)</button>
-            <button class="btn-start" onclick="socket.emit('host:start')">▶ Start (เปิดรูป)</button>
+            <button class="btn-count" onclick="socket.emit('host:countdownStart')">⏱ Countdown (เปิดแผ่นทุก 5 วิ)</button>
+            <button class="btn-start" onclick="socket.emit('host:start')">▶ Start (เปิดรูปทั้งหมด)</button>
           </div>
           <button class="btn-pause" onclick="socket.emit('host:pause')">⏸ Pause / หยุดเวลา (กดซ้ำ = ไปต่อ)</button>
           <div class="sep"></div>
@@ -345,33 +431,32 @@ const HOST_HTML = `<!DOCTYPE html>
       <p style="text-align:center;margin-top:12px"><a href="/" style="color:#7f8cff;font-size:13px">เปิดหน้า User (จอโชว์) →</a></p>
     </div>
   </div>
-
 <script>
   var socket = io();
   var pendingImg = '';
   function login(){
-    var code = document.getElementById('code').value.trim();
+    var code=document.getElementById('code').value.trim();
     socket.emit('host:login', code, function(res){
-      if (res && res.ok){ document.getElementById('login').style.display='none'; document.getElementById('app').style.display='grid'; }
-      else { document.getElementById('loginErr').textContent = (res && res.msg) || 'เข้าสู่ระบบไม่สำเร็จ'; }
+      if(res && res.ok){ document.getElementById('login').style.display='none'; document.getElementById('app').style.display='grid'; }
+      else { document.getElementById('loginErr').textContent=(res && res.msg) || 'เข้าสู่ระบบไม่สำเร็จ'; }
     });
   }
   document.getElementById('code').addEventListener('keydown', function(e){ if(e.key==='Enter') login(); });
 
   document.getElementById('imgFile').addEventListener('change', function(e){
-    var file = e.target.files[0]; if(!file) return;
-    var reader = new FileReader();
-    reader.onload = function(ev){
-      var img = new Image();
-      img.onload = function(){
-        var max=1400, w=img.width, h=img.height;
-        if (w>max || h>max){ var r=Math.min(max/w,max/h); w*=r; h*=r; }
+    var file=e.target.files[0]; if(!file) return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      var img=new Image();
+      img.onload=function(){
+        var max=1400,w=img.width,h=img.height;
+        if(w>max||h>max){ var r=Math.min(max/w,max/h); w*=r; h*=r; }
         var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
         cv.getContext('2d').drawImage(img,0,0,w,h);
-        pendingImg = cv.toDataURL('image/jpeg',0.85);
-        document.getElementById('fileLabel').textContent = '✅ ' + file.name;
+        pendingImg=cv.toDataURL('image/jpeg',0.85);
+        document.getElementById('fileLabel').textContent='✅ '+file.name;
       };
-      img.src = ev.target.result;
+      img.src=ev.target.result;
     };
     reader.readAsDataURL(file);
   });
@@ -391,19 +476,18 @@ const HOST_HTML = `<!DOCTYPE html>
   function flagLine(cls, text){ return '<div class="pv-line"><span class="flag '+cls+'"></span>'+esc(text||'-')+'</div>'; }
 
   socket.on('state', function(s){
+    var phaseTxt = s.phase==='full' ? 'เปิดรูปทั้งหมด' : (s.phase==='tiles' ? ('กำลังเปิดแผ่น '+s.revealedCount+'/'+s.tileCount+(s.revealPaused?' (พัก)':'')) : 'ปิดอยู่');
     document.getElementById('status').innerHTML =
-      'โจทย์: <b>' + (s.total ? (s.index+1)+' / '+s.total : '—') + '</b>' +
-      ' · รูป: <b>' + (s.revealed ? 'เปิดแล้ว' : 'ปิดอยู่') + '</b>' +
-      (s.countdown && s.countdown.running ? ' · ⏱ กำลังนับ' + (s.countdown.paused ? ' (พัก)' : '') : '');
+      'โจทย์: <b>' + (s.total ? (s.index+1)+' / '+s.total : '—') + '</b> · สถานะ: <b>' + phaseTxt + '</b>';
 
-    var pv = document.getElementById('preview');
+    var pv=document.getElementById('preview');
     if (s.current){
       var imgHtml = s.current.img ? '<img src="'+s.current.img+'"/>' : '<div class="ph">?</div>';
-      pv.innerHTML = imgHtml + flagLine('flag-th', s.current.q1) + flagLine('flag-us', s.current.q2) + flagLine('flag-jp', s.current.q3);
-    } else { pv.innerHTML = '<div class="ph">?</div>'; }
+      pv.innerHTML = imgHtml + flagLine('flag-th',s.current.q1) + flagLine('flag-us',s.current.q2) + flagLine('flag-jp',s.current.q3);
+    } else { pv.innerHTML='<div class="ph">?</div>'; }
 
-    var list = document.getElementById('slideList');
-    if (!s.slides || !s.slides.length){ list.innerHTML='<div style="color:#5a63a0;font-size:13px">ยังไม่มีโจทย์</div>'; return; }
+    var list=document.getElementById('slideList');
+    if(!s.slides || !s.slides.length){ list.innerHTML='<div style="color:#5a63a0;font-size:13px">ยังไม่มีโจทย์</div>'; return; }
     list.innerHTML = s.slides.map(function(sl,i){
       return '<div class="slide-item '+(i===s.index?'active':'')+'">'+
         '<div class="meta"><div>#'+(i+1)+' '+(sl.hasImg?'🖼':'—')+'</div>'+
@@ -420,4 +504,4 @@ const HOST_HTML = `<!DOCTYPE html>
 app.get('/', (req, res) => res.type('html').send(USER_HTML));
 app.get('/host', (req, res) => res.type('html').send(HOST_HTML));
 
-server.listen(PORT, () => console.log('Guest Picture v3 running on port ' + PORT));
+server.listen(PORT, () => console.log('Guest Picture v4 running on port ' + PORT));
