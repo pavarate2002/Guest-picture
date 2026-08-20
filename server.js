@@ -301,47 +301,47 @@ ${STYLE_BLOCK}
   </div>
 
 <script>
-  const hostBtn = document.getElementById('hostBtn');
-  const userBtn = document.getElementById('userBtn');
-  const modalOverlay = document.getElementById('modalOverlay');
-  const passwordInput = document.getElementById('passwordInput');
-  const errorText = document.getElementById('errorText');
-  const confirmBtn = document.getElementById('confirmBtn');
-  const cancelBtn = document.getElementById('cancelBtn');
+  var hostBtn = document.getElementById('hostBtn');
+  var userBtn = document.getElementById('userBtn');
+  var modalOverlay = document.getElementById('modalOverlay');
+  var passwordInput = document.getElementById('passwordInput');
+  var errorText = document.getElementById('errorText');
+  var confirmBtn = document.getElementById('confirmBtn');
+  var cancelBtn = document.getElementById('cancelBtn');
 
-  userBtn.addEventListener('click', () => { window.location.href = '/user'; });
+  userBtn.addEventListener('click', function () { window.location.href = '/user'; });
 
-  hostBtn.addEventListener('click', () => {
+  hostBtn.addEventListener('click', function () {
     modalOverlay.style.display = 'flex';
     errorText.textContent = '';
     passwordInput.value = '';
     passwordInput.focus();
   });
 
-  cancelBtn.addEventListener('click', () => { modalOverlay.style.display = 'none'; });
+  cancelBtn.addEventListener('click', function () { modalOverlay.style.display = 'none'; });
 
-  async function tryLogin() {
-    const password = passwordInput.value;
-    try {
-      const res = await fetch('/api/host/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      const data = await res.json();
+  function tryLogin() {
+    var password = passwordInput.value;
+    fetch('/api/host/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: password }),
+    }).then(function (res) {
+      return res.json();
+    }).then(function (data) {
       if (data.ok) {
         sessionStorage.setItem('hostPassword', password);
         window.location.href = '/host';
       } else {
         errorText.textContent = 'Incorrect password. Please try again.';
       }
-    } catch (e) {
+    }).catch(function () {
       errorText.textContent = 'Connection error. Please try again.';
-    }
+    });
   }
 
   confirmBtn.addEventListener('click', tryLogin);
-  passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryLogin(); });
+  passwordInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') tryLogin(); });
 </script>
 </body>
 </html>`;
@@ -376,104 +376,139 @@ ${STYLE_BLOCK}
   </div>
 
 <script>
-  const password = sessionStorage.getItem('hostPassword');
+  var password = sessionStorage.getItem('hostPassword');
   if (password !== 'pqc') { window.location.href = '/'; }
 
-  const slotsEl = document.getElementById('slots');
-  const statusPanel = document.getElementById('statusPanel');
-  const startBtn = document.getElementById('startBtn');
-  const nextBtn = document.getElementById('nextBtn');
-  const resetBtn = document.getElementById('resetBtn');
+  var slotsEl = document.getElementById('slots');
+  var statusPanel = document.getElementById('statusPanel');
+  var startBtn = document.getElementById('startBtn');
+  var nextBtn = document.getElementById('nextBtn');
+  var resetBtn = document.getElementById('resetBtn');
 
-  const TOTAL = 8;
-  let localQuestions = Array.from({ length: TOTAL }, () => ({ image: null, questionText: '' }));
-  let latestState = null; // always the freshest known server state
-  let requestInFlight = false; // prevents overlapping start/next clicks
-  let saveTimers = {};
+  var TOTAL = 8;
+  var localQuestions = [];
+  for (var qi = 0; qi < TOTAL; qi++) { localQuestions.push({ image: null, questionText: '' }); }
+  var latestState = null;
+  var requestInFlight = false;
+  var saveTimers = {};
+
+  function escapeAttr(str) {
+    return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
 
   function buildSlots() {
     slotsEl.innerHTML = '';
-    for (let i = 0; i < TOTAL; i++) {
-      const q = localQuestions[i];
-      const slot = document.createElement('div');
-      slot.className = 'slot';
-      slot.innerHTML = \`
-        <div class="slot-num">#\${i + 1}</div>
-        <div class="slot-thumb" id="thumb-\${i}" style="\${q.image ? \`background-image:url('\${q.image}')\` : ''}">\${q.image ? '' : '📤'}</div>
-        <input type="file" accept="image/*" id="file-\${i}" style="display:none;">
-        <div class="slot-fields">
-          <input type="text" id="qtext-\${i}" placeholder="Question text (optional)" value="\${(q.questionText || '').replace(/"/g, '&quot;')}">
-          <div class="slot-status" id="slotstatus-\${i}">\${q.image ? 'Image uploaded ✅' : 'No image yet'}</div>
-        </div>
-      \`;
-      slotsEl.appendChild(slot);
+    for (var i = 0; i < TOTAL; i++) {
+      (function (i) {
+        var q = localQuestions[i];
+        var slot = document.createElement('div');
+        slot.className = 'slot';
 
-      const thumb = slot.querySelector(\`#thumb-\${i}\`);
-      const fileInput = slot.querySelector(\`#file-\${i}\`);
-      const qtextInput = slot.querySelector(\`#qtext-\${i}\`);
+        var numDiv = document.createElement('div');
+        numDiv.className = 'slot-num';
+        numDiv.textContent = '#' + (i + 1);
 
-      thumb.addEventListener('click', () => fileInput.click());
-      fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          localQuestions[i].image = evt.target.result;
-          thumb.style.backgroundImage = \`url('\${evt.target.result}')\`;
-          thumb.textContent = '';
-          saveQuestion(i);
-        };
-        reader.readAsDataURL(file);
-      });
+        var thumb = document.createElement('div');
+        thumb.className = 'slot-thumb';
+        thumb.id = 'thumb-' + i;
+        if (q.image) {
+          thumb.style.backgroundImage = 'url(' + q.image + ')';
+        } else {
+          thumb.textContent = '📤';
+        }
 
-      qtextInput.addEventListener('input', (e) => {
-        localQuestions[i].questionText = e.target.value;
-        clearTimeout(saveTimers[i]);
-        saveTimers[i] = setTimeout(() => saveQuestion(i), 600);
-      });
+        var fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.id = 'file-' + i;
+        fileInput.style.display = 'none';
+
+        var fieldsDiv = document.createElement('div');
+        fieldsDiv.className = 'slot-fields';
+
+        var qtextInput = document.createElement('input');
+        qtextInput.type = 'text';
+        qtextInput.id = 'qtext-' + i;
+        qtextInput.placeholder = 'Question text (optional)';
+        qtextInput.value = q.questionText || '';
+
+        var statusDiv = document.createElement('div');
+        statusDiv.className = 'slot-status';
+        statusDiv.id = 'slotstatus-' + i;
+        statusDiv.textContent = q.image ? 'Image uploaded' : 'No image yet';
+
+        fieldsDiv.appendChild(qtextInput);
+        fieldsDiv.appendChild(statusDiv);
+
+        slot.appendChild(numDiv);
+        slot.appendChild(thumb);
+        slot.appendChild(fileInput);
+        slot.appendChild(fieldsDiv);
+        slotsEl.appendChild(slot);
+
+        thumb.addEventListener('click', function () { fileInput.click(); });
+        fileInput.addEventListener('change', function (e) {
+          var file = e.target.files[0];
+          if (!file) return;
+          var reader = new FileReader();
+          reader.onload = function (evt) {
+            localQuestions[i].image = evt.target.result;
+            thumb.style.backgroundImage = 'url(' + evt.target.result + ')';
+            thumb.textContent = '';
+            saveQuestion(i);
+          };
+          reader.readAsDataURL(file);
+        });
+
+        qtextInput.addEventListener('input', function (e) {
+          localQuestions[i].questionText = e.target.value;
+          clearTimeout(saveTimers[i]);
+          saveTimers[i] = setTimeout(function () { saveQuestion(i); }, 600);
+        });
+      })(i);
     }
   }
 
-  async function saveQuestion(index) {
-    const statusEl = document.getElementById(\`slotstatus-\${index}\`);
+  function saveQuestion(index) {
+    var statusEl = document.getElementById('slotstatus-' + index);
     statusEl.textContent = 'Saving...';
-    try {
-      const res = await fetch('/api/host/question', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          password, index,
-          image: localQuestions[index].image,
-          questionText: localQuestions[index].questionText,
-        }),
+    fetch('/api/host/question', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        password: password,
+        index: index,
+        image: localQuestions[index].image,
+        questionText: localQuestions[index].questionText,
+      }),
+    }).then(function (res) { return res.json(); })
+      .then(function (data) {
+        statusEl.textContent = data.ok ? 'Saved' : ('Error: ' + (data.error || 'unknown'));
+      }).catch(function () {
+        statusEl.textContent = 'Save failed (connection error)';
       });
-      const data = await res.json();
-      statusEl.textContent = data.ok ? 'Saved ✅' : ('Error: ' + (data.error || 'unknown'));
-    } catch (e) {
-      statusEl.textContent = 'Save failed (connection error)';
-    }
   }
 
-  async function loadQuestions() {
-    try {
-      const res = await fetch('/api/host/questions?password=' + encodeURIComponent(password));
-      const data = await res.json();
-      if (data.ok) { localQuestions = data.questions; buildSlots(); }
-    } catch (e) { /* ignore */ }
+  function loadQuestions() {
+    fetch('/api/host/questions?password=' + encodeURIComponent(password))
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data.ok) { localQuestions = data.questions; buildSlots(); }
+      }).catch(function () {});
   }
 
   function renderStatus() {
     if (!latestState) return;
-    const s = latestState;
-    let statusHtml = '';
+    var s = latestState;
+    var statusHtml = '';
     if (!s.gameStarted) {
       statusHtml = '<b>Status:</b> Not started yet. Upload pictures then press Start.';
     } else if (s.gameOver) {
-      statusHtml = '🎉 <b>Game Over!</b> All 8 questions finished.';
+      statusHtml = 'Game Over! All 8 questions finished.';
     } else {
-      statusHtml = \`<b>Question:</b> \${s.currentIndex + 1} / \${s.totalQuestions} &nbsp;|&nbsp; \` +
-        \`<b>Tiles revealed:</b> \${s.tilesRevealed} / \${s.totalTiles} &nbsp;|&nbsp; \` +
-        \`<b>Timer:</b> \${s.timerRunning ? ('Running (next tile in ' + s.secondsToNextTile + 's)') : 'Stopped (paused)'}\`;
+      statusHtml = '<b>Question:</b> ' + (s.currentIndex + 1) + ' / ' + s.totalQuestions + ' &nbsp;|&nbsp; ' +
+        '<b>Tiles revealed:</b> ' + s.tilesRevealed + ' / ' + s.totalTiles + ' &nbsp;|&nbsp; ' +
+        '<b>Timer:</b> ' + (s.timerRunning ? ('Running (next tile in ' + s.secondsToNextTile + 's)') : 'Stopped (paused)');
     }
     statusPanel.innerHTML = statusHtml;
 
@@ -483,43 +518,51 @@ ${STYLE_BLOCK}
     }
   }
 
-  async function pollState() {
-    try {
-      const res = await fetch('/api/state');
-      latestState = await res.json();
-      renderStatus();
-    } catch (e) { /* ignore */ }
+  function pollState() {
+    return fetch('/api/state')
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        latestState = data;
+        renderStatus();
+      }).catch(function () {});
   }
 
-  startBtn.addEventListener('click', async () => {
+  startBtn.addEventListener('click', function () {
     if (requestInFlight) return;
     requestInFlight = true;
     startBtn.disabled = true;
-    await fetch('/api/host/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
-    await pollState();
-    requestInFlight = false;
-    renderStatus();
+    fetch('/api/host/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: password }) })
+      .then(function () { return pollState(); })
+      .then(function () {
+        requestInFlight = false;
+        renderStatus();
+      });
   });
 
-  nextBtn.addEventListener('click', async () => {
+  nextBtn.addEventListener('click', function () {
     if (requestInFlight) return;
     requestInFlight = true;
     nextBtn.disabled = true;
-    await fetch('/api/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    await pollState();
-    requestInFlight = false;
-    renderStatus();
+    fetch('/api/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function () { return pollState(); })
+      .then(function () {
+        requestInFlight = false;
+        renderStatus();
+      });
   });
 
-  resetBtn.addEventListener('click', async () => {
+  resetBtn.addEventListener('click', function () {
     if (!confirm('Reset the current game progress?')) return;
-    const clearQuestions = confirm('Also clear all uploaded pictures & questions? OK = clear, Cancel = keep them.');
-    await fetch('/api/host/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, clearQuestions }) });
-    if (clearQuestions) {
-      localQuestions = Array.from({ length: TOTAL }, () => ({ image: null, questionText: '' }));
-      buildSlots();
-    }
-    await pollState();
+    var clearQuestions = confirm('Also clear all uploaded pictures & questions? OK = clear, Cancel = keep them.');
+    fetch('/api/host/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: password, clearQuestions: clearQuestions }) })
+      .then(function () {
+        if (clearQuestions) {
+          localQuestions = [];
+          for (var qi2 = 0; qi2 < TOTAL; qi2++) { localQuestions.push({ image: null, questionText: '' }); }
+          buildSlots();
+        }
+        return pollState();
+      });
   });
 
   buildSlots();
@@ -534,8 +577,7 @@ ${STYLE_BLOCK}
    PAGE: Player page
    (Pause/Resume control lives here instead of the Host dashboard.
     Uses an OPTIMISTIC UI update on click so the button/countdown reacts
-    INSTANTLY, instead of waiting for a full network round-trip before
-    showing any visual feedback - this removes the perceived "delay".)
+    instantly, instead of waiting for a full network round-trip.)
    ========================================================================= */
 const USER_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -575,33 +617,31 @@ ${STYLE_BLOCK}
   </div>
 
 <script>
-  const TOTAL_TILES = 16;
-  const waitingScreen = document.getElementById('waitingScreen');
-  const gameScreen = document.getElementById('gameScreen');
-  const gameOverScreen = document.getElementById('gameOverScreen');
-  const questionBadge = document.getElementById('questionBadge');
-  const questionText = document.getElementById('questionText');
-  const sharpLayer = document.getElementById('sharpLayer');
-  const grid = document.getElementById('grid');
-  const countdownEl = document.getElementById('countdown');
-  const statusEl = document.getElementById('status');
-  const nextBtn = document.getElementById('nextBtn');
-  const stopResumeBtn = document.getElementById('stopResumeBtn');
+  var TOTAL_TILES = 16;
+  var waitingScreen = document.getElementById('waitingScreen');
+  var gameScreen = document.getElementById('gameScreen');
+  var gameOverScreen = document.getElementById('gameOverScreen');
+  var questionBadge = document.getElementById('questionBadge');
+  var questionText = document.getElementById('questionText');
+  var sharpLayer = document.getElementById('sharpLayer');
+  var grid = document.getElementById('grid');
+  var countdownEl = document.getElementById('countdown');
+  var statusEl = document.getElementById('status');
+  var nextBtn = document.getElementById('nextBtn');
+  var stopResumeBtn = document.getElementById('stopResumeBtn');
 
-  let builtForIndex = -1;
-  let latestState = null;
-  // "pendingOverride" holds an optimistic guess of timerRunning right after a
-  // click, so the UI shows the correct state INSTANTLY, before the server
-  // has even responded. It gets cleared as soon as a poll confirms the truth
-  // (or reverted if the request ultimately failed).
-  let pendingOverride = null;
-  let stopResumeInFlight = false;
-  let nextInFlight = false;
+  var builtForIndex = -1;
+  var latestState = null;
+  var pendingOverride = null;
+  var pendingOverrideSetAt = 0;
+  var stopResumeInFlight = false;
+  var nextInFlight = false;
+  var OVERRIDE_SAFETY_TIMEOUT_MS = 3000; // never trust an optimistic guess forever
 
   function buildGrid() {
     grid.innerHTML = '';
-    for (let i = 0; i < TOTAL_TILES; i++) {
-      const tile = document.createElement('div');
+    for (var i = 0; i < TOTAL_TILES; i++) {
+      var tile = document.createElement('div');
       tile.className = 'tile';
       tile.dataset.index = i;
       tile.textContent = '?';
@@ -609,131 +649,137 @@ ${STYLE_BLOCK}
     }
   }
 
-  // tilesRevealedCount = how many tiles have been opened so far.
-  // order = the server's random reveal order (array of tile positions),
-  // e.g. order = [7, 2, 15, 0, ...] means tile #7 opens first, then #2, etc.
-  // A tile is "revealed" if its own index appears within the first
-  // tilesRevealedCount entries of that random order - NOT simply if its
-  // index number is less than tilesRevealedCount (that would be sequential).
   function applyRevealed(tilesRevealedCount, order) {
-    const revealedSet = new Set((order || []).slice(0, tilesRevealedCount));
-    const tiles = grid.querySelectorAll('.tile');
-    tiles.forEach((tile) => {
-      const idx = Number(tile.dataset.index);
-      if (revealedSet.has(idx)) tile.classList.add('revealed');
-      else tile.classList.remove('revealed');
+    var revealedSet = {};
+    var list = order || [];
+    for (var i = 0; i < tilesRevealedCount && i < list.length; i++) {
+      revealedSet[list[i]] = true;
+    }
+    var tiles = grid.querySelectorAll('.tile');
+    tiles.forEach(function (tile) {
+      var idx = Number(tile.dataset.index);
+      if (revealedSet[idx]) {
+        tile.classList.add('revealed');
+      } else {
+        tile.classList.remove('revealed');
+      }
     });
   }
 
   function effectiveTimerRunning(s) {
-    // Trust the optimistic override until the server confirms/refutes it.
     return pendingOverride !== null ? pendingOverride : s.timerRunning;
   }
 
   function renderStopResumeButton(s) {
-    const running = effectiveTimerRunning(s);
-    const disabled = !s.gameStarted || s.gameOver || s.tilesRevealed >= s.totalTiles;
+    var running = effectiveTimerRunning(s);
+    var disabled = !s.gameStarted || s.gameOver || s.tilesRevealed >= s.totalTiles;
     stopResumeBtn.disabled = disabled || stopResumeInFlight;
     if (!stopResumeInFlight) {
       stopResumeBtn.textContent = running ? '⏸ Stop Timer' : '▶ Resume Timer';
     }
   }
 
-  async function pollState() {
-    try {
-      const res = await fetch('/api/state');
-      const s = await res.json();
-      latestState = s;
+  function pollState() {
+    return fetch('/api/state')
+      .then(function (res) { return res.json(); })
+      .then(function (s) {
+        latestState = s;
 
-      // Once the server's real timerRunning matches what we optimistically
-      // predicted, we can drop the override and just trust the server again.
-      if (pendingOverride !== null && s.timerRunning === pendingOverride) {
-        pendingOverride = null;
-      }
+        if (pendingOverride !== null) {
+          if (s.timerRunning === pendingOverride) {
+            // Server confirmed our optimistic guess - drop the override.
+            pendingOverride = null;
+          } else if (Date.now() - pendingOverrideSetAt > OVERRIDE_SAFETY_TIMEOUT_MS) {
+            // Safety net: never let a stuck/incorrect guess override the
+            // real server truth forever (e.g. if a request silently failed).
+            pendingOverride = null;
+          }
+        }
 
-      if (s.gameOver) {
+        if (s.gameOver) {
+          waitingScreen.style.display = 'none';
+          gameScreen.style.display = 'none';
+          gameOverScreen.style.display = 'block';
+          return;
+        }
+        if (!s.gameStarted) {
+          waitingScreen.style.display = 'block';
+          gameScreen.style.display = 'none';
+          gameOverScreen.style.display = 'none';
+          return;
+        }
+
         waitingScreen.style.display = 'none';
-        gameScreen.style.display = 'none';
-        gameOverScreen.style.display = 'block';
-        return;
-      }
-      if (!s.gameStarted) {
-        waitingScreen.style.display = 'block';
-        gameScreen.style.display = 'none';
         gameOverScreen.style.display = 'none';
-        return;
-      }
+        gameScreen.style.display = 'block';
 
-      waitingScreen.style.display = 'none';
-      gameOverScreen.style.display = 'none';
-      gameScreen.style.display = 'block';
+        if (builtForIndex !== s.currentIndex) {
+          buildGrid();
+          builtForIndex = s.currentIndex;
+          pendingOverride = null;
+        }
 
-      if (builtForIndex !== s.currentIndex) {
-        buildGrid();
-        builtForIndex = s.currentIndex;
-        pendingOverride = null; // new question - drop any stale override
-      }
+        questionBadge.textContent = 'Question ' + (s.currentIndex + 1) + ' / ' + s.totalQuestions;
+        questionText.textContent = s.currentQuestion.questionText || '';
+        sharpLayer.style.backgroundImage = s.currentQuestion.image ? ('url(' + s.currentQuestion.image + ')') : 'none';
 
-      questionBadge.textContent = \`Question \${s.currentIndex + 1} / \${s.totalQuestions}\`;
-      questionText.textContent = s.currentQuestion.questionText || '';
-      sharpLayer.style.backgroundImage = s.currentQuestion.image ? \`url('\${s.currentQuestion.image}')\` : 'none';
+        applyRevealed(s.tilesRevealed, s.revealOrder);
+        statusEl.textContent = 'Revealed ' + s.tilesRevealed + ' / ' + s.totalTiles + ' tiles';
 
-      applyRevealed(s.tilesRevealed, s.revealOrder);
-      statusEl.textContent = \`Revealed \${s.tilesRevealed} / \${s.totalTiles} tiles\`;
+        var running = effectiveTimerRunning(s);
+        if (s.tilesRevealed >= s.totalTiles) {
+          countdownEl.textContent = 'Fully revealed';
+        } else if (running) {
+          var secs = (s.secondsToNextTile !== null && s.secondsToNextTile !== undefined) ? s.secondsToNextTile : s.secondsPerTile;
+          countdownEl.textContent = 'Next tile in: ' + secs + 's';
+        } else {
+          countdownEl.textContent = 'Paused';
+        }
 
-      const running = effectiveTimerRunning(s);
-      if (s.tilesRevealed >= s.totalTiles) {
-        countdownEl.textContent = '✅ Fully revealed';
-      } else if (running) {
-        countdownEl.textContent = \`Next tile in: \${s.secondsToNextTile !== null ? s.secondsToNextTile : s.secondsPerTile}s\`;
-      } else {
-        countdownEl.textContent = '⏸ Paused';
-      }
-
-      renderStopResumeButton(s);
-    } catch (e) { /* ignore transient errors */ }
+        renderStopResumeButton(s);
+      }).catch(function () {});
   }
 
-  stopResumeBtn.addEventListener('click', async () => {
+  stopResumeBtn.addEventListener('click', function () {
     if (stopResumeInFlight || !latestState) return;
-    const currentlyRunning = effectiveTimerRunning(latestState);
-    const action = currentlyRunning ? 'stop' : 'resume';
+    var currentlyRunning = effectiveTimerRunning(latestState);
+    var action = currentlyRunning ? 'stop' : 'resume';
 
-    // 1) INSTANT optimistic UI update - no waiting on the network at all.
     pendingOverride = (action === 'resume');
+    pendingOverrideSetAt = Date.now();
     stopResumeInFlight = true;
     stopResumeBtn.textContent = action === 'stop' ? '⏸ Stop Timer' : '▶ Resume Timer';
-    countdownEl.textContent = action === 'stop' ? '⏸ Paused' : countdownEl.textContent;
+    if (action === 'stop') { countdownEl.textContent = 'Paused'; }
     renderStopResumeButton(latestState);
 
-    // 2) Fire the request in the background; don't block the UI on it.
-    try {
-      const res = await fetch(\`/api/\${action}\`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      if (!res.ok) throw new Error('request failed');
-    } catch (e) {
-      // Revert the optimistic guess if the request actually failed.
-      pendingOverride = (action === 'resume') ? false : true;
-    }
-    stopResumeInFlight = false;
-    // 3) Quick background resync to confirm server truth (does not block UI).
-    pollState();
+    fetch('/api/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function (res) {
+        if (!res.ok) { throw new Error('request failed'); }
+      })
+      .catch(function () {
+        pendingOverride = (action === 'resume') ? false : true;
+      })
+      .then(function () {
+        stopResumeInFlight = false;
+        pollState();
+      });
   });
 
-  nextBtn.addEventListener('click', async () => {
+  nextBtn.addEventListener('click', function () {
     if (nextInFlight) return;
     nextInFlight = true;
     nextBtn.disabled = true;
     pendingOverride = null;
-    try {
-      await fetch('/api/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    } catch (e) { /* ignore, poll will resync */ }
-    await pollState();
-    nextInFlight = false;
-    nextBtn.disabled = false;
+    fetch('/api/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function () { return pollState(); })
+      .then(function () {
+        nextInFlight = false;
+        nextBtn.disabled = false;
+      });
   });
 
   pollState();
-  setInterval(pollState, 500);
+  setInterval(pollState, 1000);
 </script>
 </body>
 </html>`;
