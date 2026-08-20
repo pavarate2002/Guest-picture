@@ -23,6 +23,16 @@ function freshQuestions() {
   return Array.from({ length: TOTAL_QUESTIONS }, () => ({ image: null, questionText: '' }));
 }
 
+// Fisher-Yates shuffle - returns a new randomly-ordered array [0..n-1]
+function shuffledIndices(n) {
+  const arr = Array.from({ length: n }, (_, i) => i);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 // ---- In-memory game state (single shared game session) ----
 const state = {
   totalQuestions: TOTAL_QUESTIONS,
@@ -35,7 +45,14 @@ const state = {
   tilesRevealed: 0,
   timerRunning: false,
   tickCounter: 0,
+  revealOrder: shuffledIndices(TOTAL_TILES), // random order in which tiles get revealed for the CURRENT question
 };
+
+function startNewQuestionReveal() {
+  state.tilesRevealed = 0;
+  state.tickCounter = 0;
+  state.revealOrder = shuffledIndices(state.totalTiles);
+}
 
 // ---- Server-driven reveal timer (ticks every second) ----
 setInterval(() => {
@@ -65,6 +82,7 @@ function publicState() {
     tilesRevealed: state.tilesRevealed,
     timerRunning: state.timerRunning,
     secondsToNextTile: state.timerRunning ? (state.secondsPerTile - state.tickCounter) : null,
+    revealOrder: state.revealOrder,
     currentQuestion: { image: q.image, questionText: q.questionText },
     questionsMeta: state.questions.map(item => ({
       hasImage: !!item.image,
@@ -348,9 +366,9 @@ ${STYLE_BLOCK}
     <div class="status-panel" id="statusPanel">Loading status...</div>
 
     <div class="host-controls">
-      <button class="btn btn-green" id="startBtn">▶ Start Game</button>
-      <button class="btn btn-amber" id="stopResumeBtn">⏸ Stop Timer</button>
-      <button class="btn btn-cyan" id="nextBtn">⏭ Next Question</button>
+      <button class="btn btn-green" id="startBtn" disabled>▶ Start Game</button>
+      <button class="btn btn-amber" id="stopResumeBtn" disabled>⏸ Stop Timer</button>
+      <button class="btn btn-cyan" id="nextBtn" disabled>⏭ Next Question</button>
       <button class="btn btn-pink" id="resetBtn">🔄 Reset Game</button>
     </div>
 
@@ -371,7 +389,8 @@ ${STYLE_BLOCK}
 
   const TOTAL = 8;
   let localQuestions = Array.from({ length: TOTAL }, () => ({ image: null, questionText: '' }));
-  let latestState = null;
+  let latestState = null; // always the freshest known server state
+  let requestInFlight = false; // prevents overlapping start/stop/resume/next clicks
   let saveTimers = {};
 
   function buildSlots() {
@@ -460,15 +479,17 @@ ${STYLE_BLOCK}
     }
     statusPanel.innerHTML = statusHtml;
 
-    startBtn.disabled = s.gameStarted;
-    nextBtn.disabled = !s.gameStarted || s.gameOver;
-    stopResumeBtn.disabled = !s.gameStarted || s.gameOver;
-    if (s.timerRunning) {
-      stopResumeBtn.textContent = '⏸ Stop Timer';
-      stopResumeBtn.dataset.action = 'stop';
-    } else {
-      stopResumeBtn.textContent = '▶ Resume Timer';
-      stopResumeBtn.dataset.action = 'resume';
+    // Only touch button disabled/label state when no request is currently in flight,
+    // so a click's optimistic UI update isn't immediately overwritten by a stale poll.
+    if (!requestInFlight) {
+      startBtn.disabled = s.gameStarted;
+      nextBtn.disabled = !s.gameStarted || s.gameOver;
+      stopResumeBtn.disabled = !s.gameStarted || s.gameOver;
+      if (s.timerRunning) {
+        stopResumeBtn.textContent = '⏸ Stop Timer';
+      } else {
+        stopResumeBtn.textContent = '▶ Resume Timer';
+      }
     }
   }
 
@@ -481,19 +502,39 @@ ${STYLE_BLOCK}
   }
 
   startBtn.addEventListener('click', async () => {
+    if (requestInFlight) return;
+    requestInFlight = true;
+    startBtn.disabled = true;
     await fetch('/api/host/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
-    pollState();
+    await pollState();
+    requestInFlight = false;
+    renderStatus();
   });
 
   stopResumeBtn.addEventListener('click', async () => {
-    const action = stopResumeBtn.dataset.action === 'stop' ? 'stop' : 'resume';
-    await fetch(\`/api/host/\${action}\`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
-    pollState();
+    if (requestInFlight || !latestState) return;
+    // Decide action from the LATEST KNOWN server state, not from button text/dataset,
+    // so a stale UI can never send the wrong command.
+    const action = latestState.timerRunning ? 'stop' : 'resume';
+    requestInFlight = true;
+    stopResumeBtn.disabled = true;
+    stopResumeBtn.textContent = action === 'stop' ? 'Stopping...' : 'Resuming...';
+    try {
+      await fetch(\`/api/host/\${action}\`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+    } catch (e) { /* ignore, poll will resync */ }
+    await pollState();
+    requestInFlight = false;
+    renderStatus();
   });
 
   nextBtn.addEventListener('click', async () => {
+    if (requestInFlight) return;
+    requestInFlight = true;
+    nextBtn.disabled = true;
     await fetch('/api/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    pollState();
+    await pollState();
+    requestInFlight = false;
+    renderStatus();
   });
 
   resetBtn.addEventListener('click', async () => {
@@ -504,7 +545,7 @@ ${STYLE_BLOCK}
       localQuestions = Array.from({ length: TOTAL }, () => ({ image: null, questionText: '' }));
       buildSlots();
     }
-    pollState();
+    await pollState();
   });
 
   buildSlots();
@@ -580,10 +621,18 @@ ${STYLE_BLOCK}
     }
   }
 
-  function applyRevealed(count) {
+  // tilesRevealedCount = how many tiles have been opened so far.
+  // order = the server's random reveal order (array of tile positions),
+  // e.g. order = [7, 2, 15, 0, ...] means tile #7 opens first, then #2, etc.
+  // A tile is "revealed" if its own index appears within the first
+  // tilesRevealedCount entries of that random order - NOT simply if its
+  // index number is less than tilesRevealedCount (that would be sequential).
+  function applyRevealed(tilesRevealedCount, order) {
+    const revealedSet = new Set((order || []).slice(0, tilesRevealedCount));
     const tiles = grid.querySelectorAll('.tile');
-    tiles.forEach((tile, i) => {
-      if (i < count) tile.classList.add('revealed');
+    tiles.forEach((tile) => {
+      const idx = Number(tile.dataset.index);
+      if (revealedSet.has(idx)) tile.classList.add('revealed');
       else tile.classList.remove('revealed');
     });
   }
@@ -619,7 +668,7 @@ ${STYLE_BLOCK}
       questionText.textContent = s.currentQuestion.questionText || '';
       sharpLayer.style.backgroundImage = s.currentQuestion.image ? \`url('\${s.currentQuestion.image}')\` : 'none';
 
-      applyRevealed(s.tilesRevealed);
+      applyRevealed(s.tilesRevealed, s.revealOrder);
       statusEl.textContent = \`Revealed \${s.tilesRevealed} / \${s.totalTiles} tiles\`;
 
       if (s.tilesRevealed >= s.totalTiles) {
@@ -704,8 +753,7 @@ const server = http.createServer((req, res) => {
       state.gameStarted = true;
       state.gameOver = false;
       state.currentIndex = 0;
-      state.tilesRevealed = 0;
-      state.tickCounter = 0;
+      startNewQuestionReveal();
       state.timerRunning = true;
       return sendJSON(res, 200, { ok: true });
     });
@@ -735,22 +783,21 @@ const server = http.createServer((req, res) => {
       state.gameStarted = false;
       state.gameOver = false;
       state.currentIndex = 0;
-      state.tilesRevealed = 0;
-      state.tickCounter = 0;
+      startNewQuestionReveal();
       state.timerRunning = false;
       if (body.clearQuestions) state.questions = freshQuestions();
       return sendJSON(res, 200, { ok: true });
     });
   }
 
+  // Next question - callable by BOTH Host and User (no password required)
   if (pathname === '/api/next' && req.method === 'POST') {
     if (!state.gameStarted || state.gameOver) {
-      return sendJSON(res, 200, { ok: true });
+      return sendJSON(res, 200, { ok: true }); // no-op
     }
     if (state.currentIndex < state.totalQuestions - 1) {
       state.currentIndex++;
-      state.tilesRevealed = 0;
-      state.tickCounter = 0;
+      startNewQuestionReveal();
       state.timerRunning = true;
     } else {
       state.gameOver = true;
