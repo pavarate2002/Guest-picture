@@ -1,21 +1,28 @@
-// Guest Picture - simple version (เหมือนเกมปุ่มกด)
+// Guest Picture - simple version (ทุกไฟล์อยู่ root ไม่ต้องมีโฟลเดอร์ public)
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
 
-app.use(express.static('public'));
+// เสิร์ฟไฟล์ static จากโฟลเดอร์เดียวกับ server.js
+app.use(express.static(__dirname));
+
+// route ตรงๆ กันเหนียว (เผื่อ static ไม่จับ /)
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/host', (req, res) => res.sendFile(path.join(__dirname, 'host.html')));
+app.get('/user', (req, res) => res.sendFile(path.join(__dirname, 'user.html')));
 
 const HOST_CODE = 'pqc';
 
 // state ง่ายๆ
-let images = [];      // dataURL ของรูป
+let images = [];
 let question = 'รถคันนี้คือรุ่นอะไร?';
 let current = null;   // index รูปที่โชว์อยู่ (null = ยังไม่โชว์)
-let counting = false; // กำลังนับถอยหลังไหม
+let counting = false;
 
 function sendState() {
   io.emit('state', {
@@ -34,22 +41,17 @@ function randomIndex() {
 io.on('connection', (socket) => {
   sendState();
 
-  // host login
   socket.on('login', (code, cb) => cb(code === HOST_CODE));
 
-  // host เพิ่มรูป
   socket.on('addImages', (arr) => {
     if (Array.isArray(arr)) arr.forEach((d) => d && images.push(d));
     sendState();
   });
 
-  // host ตั้งโจทย์
   socket.on('setQuestion', (q) => { question = q || ''; sendState(); });
 
-  // host ลบรูปทั้งหมด
   socket.on('clearImages', () => { images = []; current = null; sendState(); });
 
-  // Countdown 5..1 แล้วเปิดรูปสุ่ม
   socket.on('countdown', () => {
     if (images.length === 0 || counting) return;
     counting = true;
@@ -68,13 +70,8 @@ io.on('connection', (socket) => {
     }, 1000);
   });
 
-  // เปิดรูปสุ่มทันที
   socket.on('reveal', () => { current = randomIndex(); sendState(); });
-
-  // รูปถัดไป (สุ่ม)
   socket.on('next', () => { current = randomIndex(); sendState(); });
-
-  // ซ่อนรูป (กลับหน้ารอ)
   socket.on('hide', () => { current = null; sendState(); });
 });
 
