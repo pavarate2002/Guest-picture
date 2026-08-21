@@ -4,108 +4,109 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guest Picture · Host</title>
-<link rel="stylesheet" href="style.css">
+<style>
+  body{margin:0;font-family:'Segoe UI','Noto Sans Thai',sans-serif;background:#0d1420;color:#fff;padding:20px}
+  .wrap{max-width:800px;margin:0 auto}
+  h2{margin:0 0 4px}
+  .sub{color:#9fb0cc;margin:0 0 20px}
+  .box{background:#182234;border:1px solid #2a3956;border-radius:14px;padding:18px;margin-bottom:16px}
+  button{border:none;border-radius:10px;padding:12px 18px;font-size:16px;font-weight:700;color:#fff;cursor:pointer;background:#2a3956}
+  button:hover{filter:brightness(1.15)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .red{background:#e10a1a}.green{background:#22a559}.gray{background:#39476a}
+  .btns{display:flex;gap:12px;flex-wrap:wrap}
+  input[type=text],input[type=file]{width:100%;padding:11px;border-radius:10px;border:1px solid #2a3956;background:#0f1826;color:#fff;font-size:15px;margin-top:6px}
+  label{font-size:13px;color:#9fb0cc}
+  .center{min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .loginbox{max-width:320px;width:100%}
+  .err{color:#ff5b63;font-size:13px;min-height:18px}
+  .pill{background:#0f1826;border:1px solid #2a3956;border-radius:999px;padding:6px 12px;font-size:13px;color:#9fb0cc}
+  .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;margin-top:12px}
+  .thumbs img{width:100%;height:70px;object-fit:cover;border-radius:8px;border:1px solid #2a3956}
+  .hidden{display:none}
+  a.back{color:#9fb0cc;font-size:14px}
+</style>
 </head>
 <body>
   <!-- LOGIN -->
   <div id="login" class="center">
-    <div class="brand"><div class="logo">🎛️</div><h1 style="margin:0">Host Login</h1></div>
-    <div class="card" style="max-width:360px;width:100%">
+    <div class="loginbox">
+      <h2>🎛️ Host Login</h2>
       <label>รหัส Host</label>
-      <input id="code" type="password" placeholder="ใส่รหัส…" autocomplete="off">
-      <div class="err" id="loginErr"></div>
-      <button id="loginBtn" class="btn red block" style="margin-top:12px">เข้าสู่ระบบ</button>
-      <a class="btn ghost block" href="user.html" style="margin-top:10px">← กลับหน้า User</a>
+      <input id="code" type="text" placeholder="ใส่รหัส…">
+      <div class="err" id="err"></div>
+      <button class="red" style="width:100%;margin-top:8px" onclick="doLogin()">เข้าสู่ระบบ</button>
+      <p style="text-align:center;margin-top:10px"><a class="back" href="user.html">← กลับหน้า User</a></p>
     </div>
   </div>
 
-  <!-- CONTROL PANEL -->
-  <div id="panel" class="container hidden">
-    <div class="topbar">
-      <div class="t"><span class="dot"></span> Guest Picture · Host <span class="pill">v3</span></div>
-      <div class="row">
-        <span class="pill" id="phasePill">idle</span>
-        <a class="btn ghost" href="user.html" target="_blank">🖥️ เปิดจอ User</a>
+  <!-- PANEL -->
+  <div id="panel" class="wrap hidden">
+    <h2>🎛️ Host · Guest Picture</h2>
+    <p class="sub">คุมเกม · <span class="pill" id="count">0 รูป</span> · <a class="back" href="user.html" target="_blank">เปิดจอ User ↗</a></p>
+
+    <div class="box">
+      <div class="btns">
+        <button class="red" id="bCountdown" onclick="socket.emit('countdown')">⏱️ Countdown</button>
+        <button class="green" id="bReveal" onclick="socket.emit('reveal')">▶ เปิดรูปสุ่ม</button>
+        <button class="gray" id="bNext" onclick="socket.emit('next')">⏭️ รูปถัดไป</button>
+        <button class="gray" onclick="socket.emit('hide')">↩️ กลับหน้ารอ</button>
       </div>
     </div>
 
-    <!-- Controls -->
-    <div class="card">
-      <div class="row">
-        <button id="btnCountdown" class="btn red lg">⏱️ Countdown Start</button>
-        <button id="btnStart" class="btn green lg">▶ Start</button>
-        <button id="btnNext" class="btn purple lg">⏭️ Next</button>
-        <button id="btnAnswer" class="btn blue lg">✅ Show Answer</button>
-      </div>
-      <div class="row" style="margin-top:12px">
-        <button id="btnResetMath" class="btn ghost">🔁 Reset Math</button>
-        <button id="btnResetAll" class="btn ghost">🗑️ Reset All</button>
-        <span class="grow"></span>
-        <span class="pill" id="statPill">0 / 0</span>
-      </div>
-      <div class="hr"></div>
-      <div class="row">
-        <div>
-          <label>ถอยหลังกี่วินาที (Countdown)</label>
-          <input id="cfgCountdown" type="number" min="0" max="10" value="5" style="width:120px">
-        </div>
-        <div>
-          <label>เวลาเบลอ→ชัด (วินาที)</label>
-          <input id="cfgBlur" type="number" min="0" max="30" value="8" style="width:120px">
-        </div>
-        <button id="btnCfg" class="btn ghost" style="align-self:flex-end">💾 บันทึกตั้งค่า</button>
-      </div>
-      <p class="mini" style="margin:12px 0 0">
-        <b>Countdown Start</b> = นับถอยหลังแล้วเปิดภาพ (เบลอ→ชัด) · <b>Start</b> = เปิดภาพสุ่มทันที ·
-        <b>Show Answer</b> = โชว์เฉลย · ⏸ Pause อยู่ที่หน้า <b>User</b>
-      </p>
+    <div class="box">
+      <label>โจทย์ (โชว์ใต้รูป)</label>
+      <input id="q" type="text" value="รถคันนี้คือรุ่นอะไร?" onchange="socket.emit('setQuestion', this.value)">
     </div>
 
-    <!-- Scoreboard -->
-    <div class="card">
-      <div class="t" style="font-size:16px;margin-bottom:10px">🏆 Scoreboard</div>
-      <div class="row" style="margin-bottom:10px">
-        <input id="teamName" type="text" placeholder="ชื่อทีม…" class="grow">
-        <button id="btnAddTeam" class="btn green">➕ เพิ่มทีม</button>
+    <div class="box">
+      <label>อัปโหลดรูป (เลือกหลายรูปได้)</label>
+      <input id="files" type="file" accept="image/*" multiple>
+      <div class="btns" style="margin-top:10px">
+        <button class="red" onclick="upload()">➕ เพิ่มรูป</button>
+        <button class="gray" onclick="if(confirm('ลบรูปทั้งหมด?'))socket.emit('clearImages')">🗑️ ลบรูปทั้งหมด</button>
+        <span class="pill" id="status"></span>
       </div>
-      <div id="teams"></div>
-      <p class="mini" style="margin:6px 0 0">คะแนนจะโชว์ที่มุมจอ User แบบ real-time</p>
-    </div>
-
-    <!-- Upload -->
-    <div class="card">
-      <div class="topbar" style="margin-bottom:12px">
-        <div class="t" style="font-size:16px">📤 อัปโหลดรูป + โจทย์ + เฉลย</div>
-        <span class="pill" id="uploadCount">เลือกได้หลายรูป</span>
-      </div>
-      <div class="row">
-        <div class="grow">
-          <label>เลือกรูป (หลายรูปพร้อมกันได้)</label>
-          <input id="files" type="file" accept="image/*" multiple>
-        </div>
-      </div>
-      <div class="row" style="margin-top:12px">
-        <div class="grow">
-          <label>โจทย์เริ่มต้น (ใช้กับทุกรูปรอบนี้)</label>
-          <input id="defaultQ" type="text" value="รถคันนี้คือรุ่นอะไร? / What model is this car? / この車は何の車種ですか？">
-        </div>
-      </div>
-      <div class="row" style="margin-top:12px">
-        <button id="btnUpload" class="btn red">➕ เพิ่มเข้าเกม</button>
-        <span class="muted" id="uploadStatus"></span>
-      </div>
-      <p class="mini" style="margin:10px 0 0">💡 เฉลยของแต่ละรูปมาใส่ทีหลังในรายการด้านล่างได้เลย</p>
-    </div>
-
-    <!-- Slides list -->
-    <div class="card">
-      <div class="t" style="font-size:16px;margin-bottom:6px">🖼️ รูปในเกม (<span id="slideCount">0</span>)</div>
-      <p class="mini" style="margin:0">แก้ <b>โจทย์</b> และ <b>เฉลย</b> รายรูปได้ที่นี่</p>
-      <div class="slides" id="slides"></div>
+      <div class="thumbs" id="thumbs"></div>
     </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="app-host.js"></script>
+  <script>
+    const socket = io();
+
+    function doLogin(){
+      socket.emit('login', document.getElementById('code').value, (ok) => {
+        if(ok){
+          document.getElementById('login').classList.add('hidden');
+          document.getElementById('panel').classList.remove('hidden');
+        } else {
+          document.getElementById('err').textContent = 'รหัสไม่ถูกต้อง';
+        }
+      });
+    }
+    document.getElementById('code').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+
+    function fileToDataURL(f){
+      return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); });
+    }
+    async function upload(){
+      const files = Array.from(document.getElementById('files').files||[]);
+      if(!files.length){ document.getElementById('status').textContent='ยังไม่เลือกรูป'; return; }
+      document.getElementById('status').textContent='กำลังอัปโหลด…';
+      const arr = [];
+      for(const f of files) arr.push(await fileToDataURL(f));
+      socket.emit('addImages', arr);
+      document.getElementById('files').value='';
+      document.getElementById('status').textContent='✅ เพิ่มแล้ว '+files.length+' รูป';
+    }
+
+    socket.on('state', (s) => {
+      document.getElementById('count').textContent = s.count + ' รูป';
+      document.getElementById('bCountdown').disabled = s.count===0;
+      document.getElementById('bReveal').disabled = s.count===0;
+      document.getElementById('bNext').disabled = s.count===0;
+    });
+  </script>
 </body>
 </html>

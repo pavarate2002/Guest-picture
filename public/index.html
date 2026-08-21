@@ -3,33 +3,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Guest Picture · Transformation Night</title>
-<link rel="stylesheet" href="style.css">
+<title>Guest Picture</title>
+<style>
+  body{margin:0;font-family:'Segoe UI','Noto Sans Thai',sans-serif;background:#0d1420;color:#fff;
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;text-align:center;padding:20px}
+  h1{margin:0}
+  .sub{color:#9fb0cc}
+  .btns{display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+  a.card{display:block;background:#182234;border:1px solid #2a3956;border-radius:16px;
+    padding:26px 34px;text-decoration:none;color:#fff;min-width:200px;transition:.15s}
+  a.card:hover{border-color:#e10a1a;transform:translateY(-3px)}
+  .ic{font-size:40px}
+</style>
 </head>
 <body>
-  <div class="center">
-    <div class="brand">
-      <div class="logo">🚗</div>
-      <div style="text-align:left">
-        <h1 style="margin:0">Guest Picture</h1>
-        <p class="subtitle" style="margin:0">Guess the Car Model · Transformation Night TOYOTA</p>
-      </div>
-    </div>
-    <div class="role-grid" style="margin-top:20px">
-      <a class="role-card" href="user.html">
-        <div class="ic">🖥️</div>
-        <h3>User (Screen)</h3>
-        <p>จอที่แชร์ให้ผู้เล่นดู · ไม่ต้องใส่ชื่อ กดเข้าได้เลย</p>
-      </a>
-      <a class="role-card" href="host.html">
-        <div class="ic">🎛️</div>
-        <h3>Host (Control)</h3>
-        <p>อัปโหลดรูป + โจทย์ + เฉลย และควบคุมเกม · ใส่รหัส</p>
-      </a>
-    </div>
-    <p class="muted" style="margin-top:26px;font-size:13px">
-      💡 Host เข้าได้จากหน้า User ด้วย (ปุ่ม Host มุมจอ) · ✨ v3: Blur-Reveal · เฉลย · Scoreboard · เสียง
-    </p>
+  <div>
+    <h1>🚗 Guest Picture</h1>
+    <p class="sub">ทายรุ่นรถ · Transformation Night</p>
+  </div>
+  <div class="btns">
+    <a class="card" href="user.html"><div class="ic">🖥️</div><b>User</b><br><span class="sub">จอแชร์</span></a>
+    <a class="card" href="host.html"><div class="ic">🎛️</div><b>Host</b><br><span class="sub">คุมเกม</span></a>
   </div>
 </body>
 </html>

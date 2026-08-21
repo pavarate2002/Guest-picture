@@ -3,56 +3,66 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Guest Picture · Screen</title>
-<link rel="stylesheet" href="style.css">
+<title>Guest Picture · User</title>
+<style>
+  body{margin:0;font-family:'Segoe UI','Noto Sans Thai',sans-serif;background:#0d1420;color:#fff;
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px}
+  .host-link{position:fixed;top:14px;left:14px;color:#9fb0cc;text-decoration:none;font-size:14px;
+    background:#182234;padding:8px 14px;border-radius:10px;border:1px solid #2a3956}
+  .count{font-size:min(40vw,320px);font-weight:900;line-height:1;color:#ff3b46}
+  .label{color:#9fb0cc;letter-spacing:4px;text-transform:uppercase;margin-bottom:10px}
+  img{max-width:92vw;max-height:70vh;border-radius:16px;border:1px solid #2a3956;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .q{font-size:min(6vw,38px);font-weight:800;margin-top:20px}
+  .wait{color:#9fb0cc;font-size:22px}
+  .hidden{display:none}
+</style>
 </head>
 <body>
-  <div id="stage" class="stage">
-    <a class="badge btn ghost sm" href="host.html">🎛️ Host</a>
-    <div class="tools">
-      <button id="soundBtn" class="btn ghost sm" title="เปิด/ปิดเสียง">🔊</button>
-      <button id="fsBtn" class="btn ghost sm" title="เต็มจอ">⛶ Fullscreen</button>
-    </div>
-    <div class="paused-tag">⏸ PAUSED</div>
+  <a class="host-link" href="host.html">🎛️ Host</a>
 
-    <!-- IDLE -->
-    <div id="idle">
-      <div class="brand" style="justify-content:center">
-        <div class="logo">🚗</div>
-        <h1 style="margin:0">Guest Picture</h1>
-      </div>
-      <p class="idle-hint">รอ Host เริ่มเกม… 🎬</p>
-      <p class="muted" id="idleStat"></p>
-    </div>
-
-    <!-- COUNTDOWN -->
-    <div id="countdown" class="hidden">
-      <div class="count-label">Get Ready</div>
-      <div class="count-big" id="countNum">5</div>
-    </div>
-
-    <!-- REVEAL -->
-    <div id="reveal" class="hidden">
-      <div class="imgwrap">
-        <img id="stageImg" class="stage-img" alt="">
-      </div>
-      <div class="reveal-bar"><i id="revealFill"></i></div>
-      <div class="stage-q" id="stageQ"></div>
-      <div class="answer" id="answer"></div>
-      <div class="stat"><span id="progress"></span></div>
-    </div>
-
-    <!-- Scoreboard -->
-    <div class="scorebar" id="scorebar"></div>
+  <div id="wait">
+    <h1>🚗 Guest Picture</h1>
+    <p class="wait">รอ Host เริ่มเกม…</p>
   </div>
 
-  <!-- Pause control on USER screen for accurate timing -->
-  <div class="floatctrl">
-    <button id="pauseBtn" class="btn amber" disabled>⏸ Pause</button>
+  <div id="countdown" class="hidden">
+    <div class="label">Get Ready</div>
+    <div class="count" id="num">5</div>
+  </div>
+
+  <div id="pic" class="hidden">
+    <img id="img" alt="">
+    <div class="q" id="q"></div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="sound.js"></script>
-  <script src="app-user.js"></script>
+  <script>
+    const socket = io();
+    const wait = document.getElementById('wait');
+    const cd = document.getElementById('countdown');
+    const pic = document.getElementById('pic');
+    const num = document.getElementById('num');
+    const img = document.getElementById('img');
+    const q = document.getElementById('q');
+
+    function show(which){
+      wait.classList.toggle('hidden', which!=='wait');
+      cd.classList.toggle('hidden', which!=='cd');
+      pic.classList.toggle('hidden', which!=='pic');
+    }
+
+    socket.on('countdown', (n) => { show('cd'); num.textContent = n; });
+
+    socket.on('state', (s) => {
+      if (s.image){
+        show('pic');
+        img.src = s.image;
+        q.textContent = s.question || '';
+      } else {
+        // ถ้าไม่ได้กำลังนับอยู่ ให้กลับหน้ารอ
+        if (cd.classList.contains('hidden')) show('wait');
+      }
+    });
+  </script>
 </body>
 </html>
