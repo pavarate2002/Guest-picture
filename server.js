@@ -3,7 +3,7 @@
 //  SINGLE FILE — no /public folder, no .html files.
 //    User page  = /            (TWO-COLUMN layout: left=title+questions, right=big image)
 //    Host page  = /host
-//    Version    = /version   -> {"version":"v4.5"}
+//    Version    = /version   -> {"version":"v4.7"}
 //
 //  HOST buttons:
 //   1) Pause / หยุดเวลา  (on Host window)
@@ -14,21 +14,17 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-
 const APP_VERSION = 'v4.7';
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
-
 const HOST_CODE = 'pqc';
 const PORT = process.env.PORT || 3000;
 const TILE_COUNT = 16;
 const TILE_INTERVAL = 5000;
-
 function freshState() { return { slides: [], index: 0, phase: 'idle', reveal: null }; }
 let state = freshState();
 let tileTimer = null;
-
 function clearTileTimer() { if (tileTimer) { clearInterval(tileTimer); tileTimer = null; } }
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function openTilesArray() {
@@ -67,7 +63,6 @@ function startTiles() {
   }, 200);
 }
 function stopReveal() { clearTileTimer(); state.reveal = null; }
-
 io.on('connection', (socket) => {
   socket.isHost = false;
   socket.on('join:user', () => { socket.join('users'); socket.emit('state', publicState(false)); });
@@ -76,7 +71,6 @@ io.on('connection', (socket) => {
     else { cb && cb({ ok: false, msg: 'รหัสไม่ถูกต้อง' }); }
   });
   const guard = (fn) => (...a) => { if (socket.isHost) fn(...a); };
-
   socket.on('host:addSlide', guard((s) => { state.slides.push({ img: s.img || '', q1: s.q1 || '', q2: s.q2 || '', q3: s.q3 || '' }); broadcast(); }));
   socket.on('host:deleteSlide', guard((i) => {
     if (state.slides[i]) { state.slides.splice(i, 1); if (state.index >= state.slides.length) state.index = Math.max(0, state.slides.length - 1); state.phase = 'idle'; stopReveal(); broadcast(); }
@@ -95,7 +89,6 @@ io.on('connection', (socket) => {
   socket.on('host:restartGame', guard(() => { state.index = 0; state.phase = 'idle'; stopReveal(); io.to('users').emit('flash', 'เริ่มเกมใหม่!'); broadcast(); }));
   socket.on('host:resetAll', guard(() => { stopReveal(); state = freshState(); broadcast(); }));
 });
-
 // ---------- Shared CSS: flags drawn with CSS (render on Windows) ----------
 const FLAG_CSS = `
   .flag { display:inline-block; position:relative; overflow:hidden; flex:0 0 auto;
@@ -106,7 +99,6 @@ const FLAG_CSS = `
   .flag-us { background:repeating-linear-gradient(#B22234 0 7.69%, #fff 7.69% 15.38%); }
   .flag-us::before { content:''; position:absolute; top:0; left:0; width:42%; height:53.8%; background:#3C3B6E; }
 `;
-
 // ---------- USER PAGE (TWO-COLUMN) ----------
 const USER_HTML = `<!DOCTYPE html>
 <html lang="th"><head>
@@ -123,7 +115,6 @@ const USER_HTML = `<!DOCTYPE html>
     background-image:radial-gradient(circle at 15% 0%, rgba(125,91,255,.15), transparent 40%),
                      radial-gradient(circle at 85% 100%, rgba(255,43,214,.12), transparent 40%); }
   .vertag { position:fixed; bottom:6px; right:10px; z-index:60; font-size:10px; color:#2f3560; letter-spacing:1px; }
-
   /* LEFT column */
   .left { flex:0 0 32%; max-width:460px; display:flex; flex-direction:column; gap:12px; min-height:0; }
   .panel { border-radius:16px; border:1px solid #1c2350; background:rgba(12,16,38,.75); box-shadow:0 0 24px rgba(125,91,255,.12); }
@@ -152,13 +143,12 @@ const USER_HTML = `<!DOCTYPE html>
     background:linear-gradient(90deg,#00e5ff,#7d5bff,#ff2bd6); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     animation:tpop .5s ease-out; }
   @keyframes tpop { 0%{transform:scale(.5);opacity:.3} 55%{transform:scale(1.12);opacity:1} 100%{transform:scale(1)} }
-
   /* RIGHT column */
   .right { flex:1; min-height:0; }
   .image-wrap { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center;
     border-radius:18px; overflow:hidden; background:radial-gradient(circle at 50% 40%, #0c1030, #04040c 72%);
     border:1px solid #1c2350; box-shadow:0 0 40px rgba(0,229,255,.15) inset, 0 0 30px rgba(125,91,255,.15); }
-  .image-wrap img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+  .image-wrap img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
   .placeholder { font-size:clamp(80px,18vw,260px); font-weight:800; color:#20264f; text-shadow:0 0 30px rgba(0,229,255,.2); z-index:1; }
   .tiles { position:absolute; inset:0; display:grid; z-index:5; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr); gap:0; padding:0; pointer-events:none; }
   .tiles.hidden { display:none; }
@@ -170,11 +160,9 @@ const USER_HTML = `<!DOCTYPE html>
   @keyframes scan { to { background-position:32px 0; } }
   @keyframes pulse { 0%,100%{opacity:.35;transform:scale(.85)} 50%{opacity:.9;transform:scale(1.1)} }
   .tile.open { transform:rotateY(90deg) scale(.4); opacity:0; }
-
   .flash { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:80; background:rgba(3,4,12,.7); }
   .flash.show { display:flex; }
   .flash span { font-size:clamp(30px,8vw,90px); font-weight:900; color:var(--neon); text-shadow:0 0 40px var(--neon2); }
-
   @media(max-width:760px){
     body { flex-direction:column; }
     .left { flex:0 0 auto; max-width:none; }
@@ -214,7 +202,6 @@ const USER_HTML = `<!DOCTYPE html>
   var TILE_N=16, tileNodes=[];
   for (var i=0;i<TILE_N;i++){ var d=document.createElement('div'); d.className='tile'; tilesEl.appendChild(d); tileNodes.push(d); }
   function setLine(lineId, txtId, text){ var line=document.getElementById(lineId), txt=document.getElementById(txtId); txt.textContent=text||''; if(text) line.classList.remove('empty'); else line.classList.add('empty'); }
-
   var cur = null, cdTimer = null;
   function stopCd(){ if(cdTimer){ clearInterval(cdTimer); cdTimer=null; } }
   function updateTimer(){
@@ -250,7 +237,6 @@ const USER_HTML = `<!DOCTYPE html>
   socket.on('flash', function(msg){ var f=document.getElementById('flash'); document.getElementById('flashText').textContent=msg; f.classList.remove('show'); void f.offsetWidth; f.classList.add('show'); setTimeout(function(){ f.classList.remove('show'); }, 1700); });
 </script>
 </body></html>`;
-
 // ---------- HOST PAGE ----------
 const HOST_HTML = `<!DOCTYPE html>
 <html lang="th"><head>
@@ -314,7 +300,6 @@ const HOST_HTML = `<!DOCTYPE html>
     <div class="err" id="loginErr"></div>
     <p style="font-size:12px;margin-top:10px"><a href="/" style="color:#7f8cff">กลับหน้า User</a></p>
   </div>
-
   <div class="app" id="app">
     <div>
       <div class="card">
@@ -333,7 +318,6 @@ const HOST_HTML = `<!DOCTYPE html>
         <div id="slideList"></div>
       </div>
     </div>
-
     <div>
       <div class="card">
         <h3>แผงควบคุมเกม</h3>
@@ -369,7 +353,6 @@ const HOST_HTML = `<!DOCTYPE html>
     });
   }
   document.getElementById('code').addEventListener('keydown', function(e){ if(e.key==='Enter') login(); });
-
   document.getElementById('imgFile').addEventListener('change', function(e){
     var file=e.target.files[0]; if(!file) return;
     var reader=new FileReader();
@@ -388,7 +371,6 @@ const HOST_HTML = `<!DOCTYPE html>
     };
     reader.readAsDataURL(file);
   });
-
   function addSlide(){
     var q1=document.getElementById('q1').value.trim();
     var q2=document.getElementById('q2').value.trim();
@@ -404,7 +386,6 @@ const HOST_HTML = `<!DOCTYPE html>
   function confirmResetAll(){ if(confirm('ลบรูปและคำถามทั้งหมด? ย้อนกลับไม่ได้')) socket.emit('host:resetAll'); }
   function esc(t){ return (t||'').replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
   function flagLine(cls, text){ return '<div class="pv-line"><span class="flag '+cls+'"></span>'+esc(text||'-')+'</div>'; }
-
   socket.on('state', function(s){
     var phaseTxt = s.phase==='full' ? 'เปิดรูปทั้งหมด' : (s.phase==='tiles' ? ('กำลังเปิดแผ่น '+s.revealedCount+'/'+s.tileCount+(s.revealPaused?' (พัก)':'')) : 'ปิดอยู่');
     document.getElementById('status').innerHTML = 'โจทย์: <b>' + (s.total ? (s.index+1)+' / '+s.total : '—') + '</b> · สถานะ: <b>' + phaseTxt + '</b>';
@@ -425,9 +406,7 @@ const HOST_HTML = `<!DOCTYPE html>
   });
 </script>
 </body></html>`;
-
 app.get('/', (req, res) => res.type('html').send(USER_HTML));
 app.get('/host', (req, res) => res.type('html').send(HOST_HTML));
 app.get('/version', (req, res) => res.json({ version: APP_VERSION }));
-
 server.listen(PORT, () => console.log('Guest Picture ' + APP_VERSION + ' running on port ' + PORT));
