@@ -8,9 +8,14 @@
 </head>
 <body>
   <div id="stage" class="stage">
-    <a class="badge btn ghost" href="host.html">🎛️ Host</a>
+    <a class="badge btn ghost sm" href="host.html">🎛️ Host</a>
+    <div class="tools">
+      <button id="soundBtn" class="btn ghost sm" title="เปิด/ปิดเสียง">🔊</button>
+      <button id="fsBtn" class="btn ghost sm" title="เต็มจอ">⛶ Fullscreen</button>
+    </div>
     <div class="paused-tag">⏸ PAUSED</div>
 
+    <!-- IDLE -->
     <div id="idle">
       <div class="brand" style="justify-content:center">
         <div class="logo">🚗</div>
@@ -20,23 +25,34 @@
       <p class="muted" id="idleStat"></p>
     </div>
 
+    <!-- COUNTDOWN -->
     <div id="countdown" class="hidden">
       <div class="count-label">Get Ready</div>
       <div class="count-big" id="countNum">5</div>
     </div>
 
+    <!-- REVEAL -->
     <div id="reveal" class="hidden">
-      <img id="stageImg" class="stage-img" alt="">
+      <div class="imgwrap">
+        <img id="stageImg" class="stage-img" alt="">
+      </div>
+      <div class="reveal-bar"><i id="revealFill"></i></div>
       <div class="stage-q" id="stageQ"></div>
+      <div class="answer" id="answer"></div>
       <div class="stat"><span id="progress"></span></div>
     </div>
+
+    <!-- Scoreboard -->
+    <div class="scorebar" id="scorebar"></div>
   </div>
 
+  <!-- Pause control on USER screen for accurate timing -->
   <div class="floatctrl">
     <button id="pauseBtn" class="btn amber" disabled>⏸ Pause</button>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="sound.js"></script>
   <script src="app-user.js"></script>
 </body>
 </html>

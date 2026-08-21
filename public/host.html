@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- LOGIN -->
   <div id="login" class="center">
     <div class="brand"><div class="logo">🎛️</div><h1 style="margin:0">Host Login</h1></div>
     <div class="card" style="max-width:360px;width:100%">
@@ -18,20 +19,23 @@
     </div>
   </div>
 
+  <!-- CONTROL PANEL -->
   <div id="panel" class="container hidden">
     <div class="topbar">
-      <div class="t"><span class="dot"></span> Guest Picture · Host</div>
+      <div class="t"><span class="dot"></span> Guest Picture · Host <span class="pill">v3</span></div>
       <div class="row">
         <span class="pill" id="phasePill">idle</span>
         <a class="btn ghost" href="user.html" target="_blank">🖥️ เปิดจอ User</a>
       </div>
     </div>
 
+    <!-- Controls -->
     <div class="card">
       <div class="row">
         <button id="btnCountdown" class="btn red lg">⏱️ Countdown Start</button>
         <button id="btnStart" class="btn green lg">▶ Start</button>
         <button id="btnNext" class="btn purple lg">⏭️ Next</button>
+        <button id="btnAnswer" class="btn blue lg">✅ Show Answer</button>
       </div>
       <div class="row" style="margin-top:12px">
         <button id="btnResetMath" class="btn ghost">🔁 Reset Math</button>
@@ -39,27 +43,50 @@
         <span class="grow"></span>
         <span class="pill" id="statPill">0 / 0</span>
       </div>
-      <p class="muted" style="font-size:13px;margin:12px 0 0">
-        <b>Countdown Start</b> = นับ 5→1 แล้วเปิดภาพสุ่ม · <b>Start</b> = เปิดภาพสุ่มทันที ·
-        <b>Reset Math</b> = รีเกม แต่เก็บรูป/โจทย์ · <b>Reset All</b> = ลบทั้งหมด ·
-        ⏸ ปุ่ม Pause อยู่ที่หน้า <b>User</b>
+      <div class="hr"></div>
+      <div class="row">
+        <div>
+          <label>ถอยหลังกี่วินาที (Countdown)</label>
+          <input id="cfgCountdown" type="number" min="0" max="10" value="5" style="width:120px">
+        </div>
+        <div>
+          <label>เวลาเบลอ→ชัด (วินาที)</label>
+          <input id="cfgBlur" type="number" min="0" max="30" value="8" style="width:120px">
+        </div>
+        <button id="btnCfg" class="btn ghost" style="align-self:flex-end">💾 บันทึกตั้งค่า</button>
+      </div>
+      <p class="mini" style="margin:12px 0 0">
+        <b>Countdown Start</b> = นับถอยหลังแล้วเปิดภาพ (เบลอ→ชัด) · <b>Start</b> = เปิดภาพสุ่มทันที ·
+        <b>Show Answer</b> = โชว์เฉลย · ⏸ Pause อยู่ที่หน้า <b>User</b>
       </p>
     </div>
 
+    <!-- Scoreboard -->
+    <div class="card">
+      <div class="t" style="font-size:16px;margin-bottom:10px">🏆 Scoreboard</div>
+      <div class="row" style="margin-bottom:10px">
+        <input id="teamName" type="text" placeholder="ชื่อทีม…" class="grow">
+        <button id="btnAddTeam" class="btn green">➕ เพิ่มทีม</button>
+      </div>
+      <div id="teams"></div>
+      <p class="mini" style="margin:6px 0 0">คะแนนจะโชว์ที่มุมจอ User แบบ real-time</p>
+    </div>
+
+    <!-- Upload -->
     <div class="card">
       <div class="topbar" style="margin-bottom:12px">
-        <div class="t" style="font-size:16px">📤 อัปโหลดรูป + โจทย์</div>
+        <div class="t" style="font-size:16px">📤 อัปโหลดรูป + โจทย์ + เฉลย</div>
         <span class="pill" id="uploadCount">เลือกได้หลายรูป</span>
       </div>
       <div class="row">
         <div class="grow">
-          <label>เลือกรูป (เลือกหลายรูปพร้อมกันได้)</label>
+          <label>เลือกรูป (หลายรูปพร้อมกันได้)</label>
           <input id="files" type="file" accept="image/*" multiple>
         </div>
       </div>
       <div class="row" style="margin-top:12px">
         <div class="grow">
-          <label>โจทย์เริ่มต้น (ใช้กับทุกรูปที่อัปโหลดรอบนี้ — แก้ทีหลังได้)</label>
+          <label>โจทย์เริ่มต้น (ใช้กับทุกรูปรอบนี้)</label>
           <input id="defaultQ" type="text" value="รถคันนี้คือรุ่นอะไร? / What model is this car? / この車は何の車種ですか？">
         </div>
       </div>
@@ -67,11 +94,13 @@
         <button id="btnUpload" class="btn red">➕ เพิ่มเข้าเกม</button>
         <span class="muted" id="uploadStatus"></span>
       </div>
+      <p class="mini" style="margin:10px 0 0">💡 เฉลยของแต่ละรูปมาใส่ทีหลังในรายการด้านล่างได้เลย</p>
     </div>
 
+    <!-- Slides list -->
     <div class="card">
       <div class="t" style="font-size:16px;margin-bottom:6px">🖼️ รูปในเกม (<span id="slideCount">0</span>)</div>
-      <p class="muted" style="font-size:13px;margin:0">คลิกที่ช่องโจทย์เพื่อแก้ไขเฉพาะรูปได้</p>
+      <p class="mini" style="margin:0">แก้ <b>โจทย์</b> และ <b>เฉลย</b> รายรูปได้ที่นี่</p>
       <div class="slides" id="slides"></div>
     </div>
   </div>

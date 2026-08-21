@@ -1,6 +1,6 @@
 {
   "name": "guest-picture",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Guest Picture - Guess the Car Model game (Host/User) for Transformation Night TOYOTA",
   "main": "server.js",
   "scripts": {
