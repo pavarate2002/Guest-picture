@@ -6,7 +6,6 @@ const panel = $('panel');
 
 let isHost = false;
 
-// ---------------- Login ----------------
 function tryLogin() {
   const code = $('code').value;
   socket.emit('host:login', code, (res) => {
@@ -23,7 +22,6 @@ function tryLogin() {
 $('loginBtn').addEventListener('click', tryLogin);
 $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') tryLogin(); });
 
-// ---------------- Controls ----------------
 $('btnCountdown').addEventListener('click', () => socket.emit('host:countdownStart'));
 $('btnStart').addEventListener('click', () => socket.emit('host:start'));
 $('btnNext').addEventListener('click', () => socket.emit('host:next'));
@@ -38,7 +36,6 @@ $('btnResetAll').addEventListener('click', () => {
   }
 });
 
-// ---------------- Upload ----------------
 function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -64,7 +61,6 @@ $('btnUpload').addEventListener('click', async () => {
   setTimeout(refreshSlides, 250);
 });
 
-// ---------------- Slides list ----------------
 function refreshSlides() {
   if (!isHost) return;
   socket.emit('host:listSlides', null, (slides) => renderSlides(slides || []));
@@ -95,13 +91,10 @@ function renderSlides(slides) {
   });
 }
 
-// ---------------- State sync ----------------
 socket.on('state', (s) => {
   $('phasePill').textContent = s.paused ? 'paused' : s.phase;
   $('statPill').textContent = `${s.revealedCount} / ${s.total}`;
   $('uploadCount').textContent = `ในเกมตอนนี้: ${s.total} รูป`;
-
-  // enable/disable controls sensibly
   $('btnCountdown').disabled = s.total === 0;
   $('btnStart').disabled = s.total === 0;
   $('btnNext').disabled = s.total === 0 || s.phase === 'countdown';

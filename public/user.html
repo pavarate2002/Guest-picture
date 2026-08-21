@@ -8,11 +8,9 @@
 </head>
 <body>
   <div id="stage" class="stage">
-    <!-- Host quick-access from User page -->
     <a class="badge btn ghost" href="host.html">🎛️ Host</a>
     <div class="paused-tag">⏸ PAUSED</div>
 
-    <!-- IDLE -->
     <div id="idle">
       <div class="brand" style="justify-content:center">
         <div class="logo">🚗</div>
@@ -22,23 +20,18 @@
       <p class="muted" id="idleStat"></p>
     </div>
 
-    <!-- COUNTDOWN -->
     <div id="countdown" class="hidden">
       <div class="count-label">Get Ready</div>
       <div class="count-big" id="countNum">5</div>
     </div>
 
-    <!-- REVEAL -->
     <div id="reveal" class="hidden">
       <img id="stageImg" class="stage-img" alt="">
       <div class="stage-q" id="stageQ"></div>
-      <div class="stat">
-        <span id="progress"></span>
-      </div>
+      <div class="stat"><span id="progress"></span></div>
     </div>
   </div>
 
-  <!-- Pause control lives on the USER screen for accurate timing -->
   <div class="floatctrl">
     <button id="pauseBtn" class="btn amber" disabled>⏸ Pause</button>
   </div>

@@ -20,10 +20,7 @@ function show(view) {
 }
 
 socket.on('state', (s) => {
-  // paused visual
   el.stage.classList.toggle('paused', !!s.paused);
-
-  // pause button only active during countdown
   el.pauseBtn.disabled = s.phase !== 'countdown';
   el.pauseBtn.textContent = s.paused ? '▶ Resume' : '⏸ Pause';
   el.pauseBtn.classList.toggle('green', s.paused);
@@ -45,5 +42,4 @@ socket.on('state', (s) => {
   }
 });
 
-// Pause / resume from the user screen
 el.pauseBtn.addEventListener('click', () => socket.emit('togglePause'));

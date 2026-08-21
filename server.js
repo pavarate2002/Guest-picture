@@ -11,7 +11,7 @@
  *
  * Buttons:
  *   - Countdown Start : counts 5..1 then reveals a RANDOM picture.
- *   - Start           : reveals a random picture immediately (host press = users can act).
+ *   - Start           : reveals a random picture immediately.
  *   - Pause / Resume  : freezes / continues the countdown (available on Host & User).
  *   - Next            : go to the next random picture.
  *   - Reset Math      : restart the game (score/progress) but KEEP images & questions.
@@ -32,13 +32,10 @@ const COUNTDOWN_FROM = 5;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ---------------------------------------------------------------------------
-// Game state (in-memory - perfect for a single live event)
-// ---------------------------------------------------------------------------
 let state = {
   slides: [],          // [{ id, image(dataURL), question }]
   queue: [],           // shuffled indexes not shown yet (true random, no repeat)
-  currentIndex: -1,    // index of the slide currently revealed
+  currentIndex: -1,
   phase: 'idle',       // 'idle' | 'countdown' | 'revealed'
   countdown: COUNTDOWN_FROM,
   paused: false,
@@ -47,7 +44,6 @@ let state = {
 
 let timer = null;
 
-// Fisher-Yates shuffle -> genuinely random order
 function shuffle(arr) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
@@ -58,11 +54,9 @@ function shuffle(arr) {
 }
 
 function rebuildQueue() {
-  const idx = state.slides.map((_, i) => i);
-  state.queue = shuffle(idx);
+  state.queue = shuffle(state.slides.map((_, i) => i));
 }
 
-// Public snapshot sent to clients (slides list without heavy images for control panel)
 function publicState() {
   return {
     total: state.slides.length,
@@ -76,17 +70,12 @@ function publicState() {
   };
 }
 
-function broadcast() {
-  io.emit('state', publicState());
-}
-
-function stopTimer() {
-  if (timer) { clearInterval(timer); timer = null; }
-}
+function broadcast() { io.emit('state', publicState()); }
+function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
 
 function pickNextIndex() {
-  if (state.queue.length === 0) rebuildQueue();          // reshuffle when exhausted
-  if (state.queue.length === 0) return -1;               // no slides at all
+  if (state.queue.length === 0) rebuildQueue();
+  if (state.queue.length === 0) return -1;
   return state.queue.shift();
 }
 
@@ -111,11 +100,8 @@ function startCountdown() {
   timer = setInterval(() => {
     if (state.paused) return;                 // pause = freeze tick (server-side = accurate)
     state.countdown -= 1;
-    if (state.countdown <= 0) {
-      reveal();                               // 0 -> reveal random picture
-    } else {
-      broadcast();
-    }
+    if (state.countdown <= 0) reveal();
+    else broadcast();
   }, 1000);
 }
 
@@ -126,7 +112,7 @@ function resetMath() {
   state.countdown = COUNTDOWN_FROM;
   state.paused = false;
   state.revealedCount = 0;
-  rebuildQueue();                             // keep slides, fresh shuffle
+  rebuildQueue();
   broadcast();
 }
 
@@ -139,13 +125,9 @@ function resetAll() {
   broadcast();
 }
 
-// ---------------------------------------------------------------------------
-// Socket handlers
-// ---------------------------------------------------------------------------
 io.on('connection', (socket) => {
   socket.emit('state', publicState());
 
-  // ---- Host authentication ----
   socket.on('host:login', (code, cb) => {
     const ok = String(code).trim() === HOST_CODE;
     if (ok) socket.data.isHost = true;
@@ -157,9 +139,7 @@ io.on('connection', (socket) => {
     fn(...args);
   };
 
-  // ---- Slide management ----
   socket.on('host:addSlides', requireHost((slides) => {
-    // slides: [{ image(dataURL), question }]
     if (!Array.isArray(slides)) return;
     slides.forEach((s) => {
       if (s && s.image) {
@@ -190,9 +170,8 @@ io.on('connection', (socket) => {
     if (typeof cb === 'function') cb(state.slides);
   }));
 
-  // ---- Game controls (Host + User can pause/resume) ----
   socket.on('host:countdownStart', requireHost(() => startCountdown()));
-  socket.on('host:start', requireHost(() => reveal()));      // immediate reveal
+  socket.on('host:start', requireHost(() => reveal()));
   socket.on('host:next', requireHost(() => {
     if (state.phase === 'countdown') return;
     reveal();
@@ -200,21 +179,17 @@ io.on('connection', (socket) => {
   socket.on('host:resetMath', requireHost(() => resetMath()));
   socket.on('host:resetAll', requireHost(() => resetAll()));
 
-  // Pause / resume allowed from Host OR User screen (better timing control)
   socket.on('pause', () => {
     if (state.phase !== 'countdown') return;
-    state.paused = true;
-    broadcast();
+    state.paused = true; broadcast();
   });
   socket.on('resume', () => {
     if (state.phase !== 'countdown') return;
-    state.paused = false;
-    broadcast();
+    state.paused = false; broadcast();
   });
   socket.on('togglePause', () => {
     if (state.phase !== 'countdown') return;
-    state.paused = !state.paused;
-    broadcast();
+    state.paused = !state.paused; broadcast();
   });
 });
 
