@@ -1,5 +1,5 @@
 // ============================================================
-//  Transformation Night · GUEST PICTURE  (v4.5)
+//  Transformation Night · GUEST PICTURE  (v4.6)
 //  SINGLE FILE — no /public folder, no .html files.
 //    User page  = /            (TWO-COLUMN layout: left=title+questions, right=big image)
 //    Host page  = /host
@@ -15,7 +15,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-const APP_VERSION = 'v4.5';
+const APP_VERSION = 'v4.6';
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
@@ -119,13 +119,13 @@ const USER_HTML = `<!DOCTYPE html>
     height:100vh; height:100dvh; display:flex; gap:12px; padding:12px;
     background-image:radial-gradient(circle at 15% 0%, rgba(125,91,255,.15), transparent 40%),
                      radial-gradient(circle at 85% 100%, rgba(255,43,214,.12), transparent 40%); }
-  .vertag { position:fixed; bottom:6px; left:10px; z-index:60; font-size:10px; color:#2f3560; letter-spacing:1px; }
+  .vertag { position:fixed; bottom:6px; right:10px; z-index:60; font-size:10px; color:#2f3560; letter-spacing:1px; }
 
   /* LEFT column */
   .left { flex:0 0 32%; max-width:460px; display:flex; flex-direction:column; gap:12px; min-height:0; }
   .panel { border-radius:16px; border:1px solid #1c2350; background:rgba(12,16,38,.75); box-shadow:0 0 24px rgba(125,91,255,.12); }
   .title-panel { position:relative; padding:16px 14px 14px; text-align:center; }
-  .host-link { position:absolute; top:8px; right:10px; font-size:11px; color:#7f8cff; text-decoration:none; border:1px solid #2a2f55; padding:3px 8px; border-radius:20px; background:rgba(10,12,30,.6); }
+  .host-link { position:fixed; bottom:8px; left:8px; z-index:70; font-size:11px; color:#7f8cff; text-decoration:none; border:1px solid #2a2f55; padding:4px 10px; border-radius:20px; background:rgba(10,12,30,.7); }
   .host-link:hover { color:var(--neon); border-color:var(--neon); }
   .led-title { display:inline-block; font-weight:900; letter-spacing:5px; font-size:clamp(24px, 3vw, 40px);
     background:linear-gradient(90deg,#00e5ff,#7d5bff,#ff2bd6,#00e5ff); background-size:300% 100%;
@@ -136,7 +136,7 @@ const USER_HTML = `<!DOCTYPE html>
   @keyframes blink { 50% { opacity:.15; } }
   @keyframes flicker { 0%,19%,21%,23%,80%,100%{opacity:1} 20%,22%{opacity:.7} }
   .subtitle { margin-top:3px; font-size:clamp(9px,1vw,12px); letter-spacing:4px; color:#5a63a0; text-transform:uppercase; }
-  .question { flex:1; min-height:0; display:flex; flex-direction:column; justify-content:center; gap:18px; padding:22px 20px; }
+  .question { flex:1; min-height:0; display:flex; flex-direction:column; justify-content:flex-start; gap:18px; padding:22px 20px; }
   .q-line { display:flex; align-items:center; gap:16px; font-size:clamp(16px,1.8vw,26px); min-height:1.5em; }
   .q-line .flag { width:clamp(40px,3.4vw,58px); height:clamp(27px,2.3vw,38px); }
   .q-line .txt { color:#e8ecff; word-break:break-word; }
@@ -174,9 +174,9 @@ const USER_HTML = `<!DOCTYPE html>
 </style></head>
 <body>
   <div class="vertag">${APP_VERSION}</div>
+  <a class="host-link" href="/host">🔒 Host</a>
   <div class="left">
     <div class="panel title-panel">
-      <a class="host-link" href="/host">Host</a>
       <div class="led-title">GUEST<span class="dot">·</span>PICTURE</div>
       <div class="subtitle">Transformation Night</div>
     </div>
