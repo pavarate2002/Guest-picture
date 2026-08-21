@@ -7,17 +7,25 @@
 <style>
   body{margin:0;font-family:'Segoe UI','Noto Sans Thai',sans-serif;background:#0d1420;color:#fff;
     min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px}
-  .host-link{position:fixed;top:14px;left:14px;color:#9fb0cc;text-decoration:none;font-size:14px;
-    background:#182234;padding:8px 14px;border-radius:10px;border:1px solid #2a3956}
+  /* ปุ่ม Host ย้ายมามุมซ้ายล่าง */
+  .host-link{position:fixed;bottom:14px;left:14px;color:#9fb0cc;text-decoration:none;font-size:14px;
+    background:#182234;padding:8px 14px;border-radius:10px;border:1px solid #2a3956;z-index:10}
   .count{font-size:min(40vw,320px);font-weight:900;line-height:1;color:#ff3b46}
   .label{color:#9fb0cc;letter-spacing:4px;text-transform:uppercase;margin-bottom:10px}
-  img{max-width:92vw;max-height:70vh;border-radius:16px;border:1px solid #2a3956;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-  .q{font-size:min(6vw,38px);font-weight:800;margin-top:20px}
+  img{max-width:92vw;max-height:66vh;border-radius:16px;border:1px solid #2a3956;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  /* โจทย์ย้ายขึ้นด้านบน + ตัวใหญ่อ่านง่าย */
+  .q-top{position:fixed;top:0;left:0;right:0;padding:18px 20px;font-size:min(6vw,40px);font-weight:800;
+    background:linear-gradient(180deg,rgba(13,20,32,.96),rgba(13,20,32,0));text-align:center;z-index:9}
   .wait{color:#9fb0cc;font-size:22px}
   .hidden{display:none}
+  #pic{margin-top:70px}
 </style>
 </head>
 <body>
+  <!-- โจทย์อยู่ด้านบนสุด (โชว์เฉพาะตอนมีรูป) -->
+  <div class="q-top hidden" id="qTop"></div>
+
+  <!-- ปุ่ม Host มุมซ้ายล่าง -->
   <a class="host-link" href="host.html">🎛️ Host</a>
 
   <div id="wait">
@@ -32,7 +40,6 @@
 
   <div id="pic" class="hidden">
     <img id="img" alt="">
-    <div class="q" id="q"></div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
@@ -43,12 +50,14 @@
     const pic = document.getElementById('pic');
     const num = document.getElementById('num');
     const img = document.getElementById('img');
-    const q = document.getElementById('q');
+    const qTop = document.getElementById('qTop');
 
     function show(which){
       wait.classList.toggle('hidden', which!=='wait');
       cd.classList.toggle('hidden', which!=='cd');
       pic.classList.toggle('hidden', which!=='pic');
+      // โจทย์โชว์เฉพาะตอนมีรูป
+      qTop.classList.toggle('hidden', which!=='pic');
     }
 
     socket.on('countdown', (n) => { show('cd'); num.textContent = n; });
@@ -57,7 +66,7 @@
       if (s.image){
         show('pic');
         img.src = s.image;
-        q.textContent = s.question || '';
+        qTop.textContent = s.question || '';
       } else {
         // ถ้าไม่ได้กำลังนับอยู่ ให้กลับหน้ารอ
         if (cd.classList.contains('hidden')) show('wait');
