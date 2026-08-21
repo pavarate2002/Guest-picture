@@ -1,5 +1,5 @@
 // ============================================================
-//  Transformation Night · GUEST PICTURE  (v4.6)
+//  Transformation Night · GUEST PICTURE  (v4.7)
 //  SINGLE FILE — no /public folder, no .html files.
 //    User page  = /            (TWO-COLUMN layout: left=title+questions, right=big image)
 //    Host page  = /host
@@ -15,7 +15,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-const APP_VERSION = 'v4.6';
+const APP_VERSION = 'v4.7';
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
@@ -44,6 +44,9 @@ function publicState(forHost) {
     version: APP_VERSION, total: state.slides.length, index: state.index, phase: state.phase,
     tilesOpen: openTilesArray(), revealedCount: state.reveal ? state.reveal.revealedCount : 0,
     tileCount: TILE_COUNT, revealPaused: state.reveal ? state.reveal.paused : false,
+    nextAt: state.reveal ? state.reveal.nextAt : 0,
+    pausedRemaining: state.reveal ? state.reveal.pausedRemaining : 0,
+    intervalSec: TILE_INTERVAL / 1000,
     current: cur ? { img: showImg ? cur.img : null, q1: cur.q1, q2: cur.q2, q3: cur.q3 } : null,
     slides: forHost ? state.slides.map(s => ({ q1: s.q1, q2: s.q2, q3: s.q3, hasImg: !!s.img })) : undefined
   };
@@ -141,6 +144,14 @@ const USER_HTML = `<!DOCTYPE html>
   .q-line .flag { width:clamp(40px,3.4vw,58px); height:clamp(27px,2.3vw,38px); }
   .q-line .txt { color:#e8ecff; word-break:break-word; }
   .q-line.empty .txt { color:#3a4170; }
+  /* countdown timer under questions */
+  .timer { margin-top:auto; display:none; align-items:center; justify-content:center; padding-top:14px; }
+  .timer.show { display:flex; }
+  .timer-num { font-weight:900; line-height:1; font-size:clamp(70px,10vw,150px);
+    color:#fff; text-shadow:0 0 30px var(--neon), 0 0 60px var(--neon2);
+    background:linear-gradient(90deg,#00e5ff,#7d5bff,#ff2bd6); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    animation:tpop .5s ease-out; }
+  @keyframes tpop { 0%{transform:scale(.5);opacity:.3} 55%{transform:scale(1.12);opacity:1} 100%{transform:scale(1)} }
 
   /* RIGHT column */
   .right { flex:1; min-height:0; }
@@ -149,10 +160,10 @@ const USER_HTML = `<!DOCTYPE html>
     border:1px solid #1c2350; box-shadow:0 0 40px rgba(0,229,255,.15) inset, 0 0 30px rgba(125,91,255,.15); }
   .image-wrap img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
   .placeholder { font-size:clamp(80px,18vw,260px); font-weight:800; color:#20264f; text-shadow:0 0 30px rgba(0,229,255,.2); z-index:1; }
-  .tiles { position:absolute; inset:0; display:grid; z-index:5; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr); gap:6px; padding:6px; pointer-events:none; }
+  .tiles { position:absolute; inset:0; display:grid; z-index:5; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr); gap:0; padding:0; pointer-events:none; }
   .tiles.hidden { display:none; }
-  .tile { position:relative; border-radius:10px; overflow:hidden; background:linear-gradient(135deg,#141a45,#0a0e26);
-    border:1px solid rgba(0,229,255,.35); box-shadow:0 0 12px rgba(0,229,255,.25) inset, 0 0 10px rgba(125,91,255,.2);
+  .tile { position:relative; overflow:hidden; background:linear-gradient(135deg,#141a45,#0a0e26);
+    box-shadow:0 0 12px rgba(0,229,255,.18) inset;
     transition:transform .55s cubic-bezier(.2,.8,.2,1), opacity .55s ease; transform-style:preserve-3d; }
   .tile::before { content:''; position:absolute; inset:0; background:repeating-linear-gradient(45deg, rgba(0,229,255,.08) 0 8px, transparent 8px 16px); animation:scan 3s linear infinite; }
   .tile::after { content:''; position:absolute; inset:0; margin:auto; width:38%; height:38%; border-radius:50%; background:radial-gradient(circle, rgba(0,229,255,.55), transparent 70%); filter:blur(2px); animation:pulse 2.4s ease-in-out infinite; }
@@ -184,6 +195,7 @@ const USER_HTML = `<!DOCTYPE html>
       <div class="q-line empty" id="line1"><span class="flag flag-th"></span><span class="txt" id="t1"></span></div>
       <div class="q-line empty" id="line2"><span class="flag flag-us"></span><span class="txt" id="t2"></span></div>
       <div class="q-line empty" id="line3"><span class="flag flag-jp"></span><span class="txt" id="t3"></span></div>
+      <div class="timer" id="timer"><div class="timer-num" id="timerNum">5</div></div>
     </div>
   </div>
   <div class="right">
@@ -198,10 +210,28 @@ const USER_HTML = `<!DOCTYPE html>
   var socket = io();
   socket.on('connect', function(){ socket.emit('join:user'); });
   var pic=document.getElementById('pic'), placeholder=document.getElementById('placeholder'), tilesEl=document.getElementById('tiles');
+  var timerEl=document.getElementById('timer'), timerNum=document.getElementById('timerNum');
   var TILE_N=16, tileNodes=[];
   for (var i=0;i<TILE_N;i++){ var d=document.createElement('div'); d.className='tile'; tilesEl.appendChild(d); tileNodes.push(d); }
   function setLine(lineId, txtId, text){ var line=document.getElementById(lineId), txt=document.getElementById(txtId); txt.textContent=text||''; if(text) line.classList.remove('empty'); else line.classList.add('empty'); }
+
+  var cur = null, cdTimer = null;
+  function stopCd(){ if(cdTimer){ clearInterval(cdTimer); cdTimer=null; } }
+  function updateTimer(){
+    if(!cur || cur.phase!=='tiles' || (cur.revealedCount>=cur.tileCount)){ timerEl.classList.remove('show'); stopCd(); return; }
+    timerEl.classList.add('show');
+    var remaining;
+    if(cur.revealPaused){ remaining = (cur.pausedRemaining||0)/1000; }
+    else { remaining = (cur.nextAt - Date.now())/1000; }
+    if(remaining < 0) remaining = 0;
+    var shown = Math.max(1, Math.min(cur.intervalSec||5, Math.ceil(remaining)));
+    if(timerNum.textContent !== String(shown)){
+      timerNum.textContent = shown;
+      timerNum.style.animation='none'; void timerNum.offsetWidth; timerNum.style.animation='tpop .5s ease-out';
+    }
+  }
   function render(s){
+    cur = s;
     if (s.current && s.current.img){ pic.src=s.current.img; pic.style.display='block'; placeholder.style.display='none'; }
     else { pic.style.display='none'; placeholder.style.display='block'; }
     var showTiles = !!(s.current && s.current.img) && s.phase !== 'full';
@@ -209,6 +239,12 @@ const USER_HTML = `<!DOCTYPE html>
     var open=s.tilesOpen||[]; for (var i=0;i<TILE_N;i++){ tileNodes[i].classList.toggle('open', !!open[i]); }
     if (s.current){ setLine('line1','t1',s.current.q1); setLine('line2','t2',s.current.q2); setLine('line3','t3',s.current.q3); }
     else { setLine('line1','t1',''); setLine('line2','t2',''); setLine('line3','t3',''); }
+    // countdown timer
+    stopCd();
+    if(s.phase==='tiles' && s.revealedCount < s.tileCount){
+      updateTimer();
+      if(!s.revealPaused) cdTimer = setInterval(updateTimer, 120);
+    } else { timerEl.classList.remove('show'); }
   }
   socket.on('state', render);
   socket.on('flash', function(msg){ var f=document.getElementById('flash'); document.getElementById('flashText').textContent=msg; f.classList.remove('show'); void f.offsetWidth; f.classList.add('show'); setTimeout(function(){ f.classList.remove('show'); }, 1700); });

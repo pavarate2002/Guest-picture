@@ -1,11 +1,11 @@
-# Transformation Night · GUEST PICTURE (v4.6)
+# Transformation Night · GUEST PICTURE (v4.7)
 
 เกมทายภาพ real-time · แผ่น LED 4×4 · ธีมนีออน · **หน้า User แบบ 2 คอลัมน์**
 ไฟล์เดียวจบ ไม่มีโฟลเดอร์ public ไม่มีไฟล์ .html
 
 ## repo ต้องมีแค่ 3 ไฟล์นี้
 ```
-server.js       ← v4.6
+server.js       ← v4.7
 package.json
 README.md
 ```
@@ -13,7 +13,7 @@ README.md
 ## เปิดใช้งาน (ห้ามมี .html!)
 - User = `https://<app>.onrender.com/`
 - Host = `https://<app>.onrender.com/host`   (รหัส pqc)
-- เช็ค = `https://<app>.onrender.com/version` → `{"version":"v4.6"}`
+- เช็ค = `https://<app>.onrender.com/version` → `{"version":"v4.7"}`
 
 ## Layout หน้า User
 - ซ้าย: ชื่อ GUEST·PICTURE + คำถาม 3 บรรทัด (ธง ไทย→อเมริกา→ญี่ปุ่น บนลงล่าง)
