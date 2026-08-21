@@ -1,5 +1,5 @@
 // ============================================================
-//  Transformation Night · GUEST PICTURE  (v4.4)
+//  Transformation Night · GUEST PICTURE  (v4.5)
 //  SINGLE FILE — no /public folder, no .html files.
 //    User page  = /
 //    Host page  = /host
@@ -15,7 +15,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-const APP_VERSION = 'v4.4';
+const APP_VERSION = 'v4.5';
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
@@ -150,15 +150,20 @@ const USER_HTML = `<!DOCTYPE html>
   * { box-sizing:border-box; margin:0; padding:0; }
   html,body { height:100%; overflow:hidden; }
   body { font-family:'Segoe UI',Tahoma,sans-serif; background:#04040c; color:#fff;
-    height:100vh; height:100dvh; display:flex; flex-direction:column;
-    background-image:radial-gradient(circle at 20% 0%, rgba(125,91,255,.15), transparent 40%),
-                     radial-gradient(circle at 80% 100%, rgba(255,43,214,.12), transparent 40%); }
-  .host-link { position:fixed; top:10px; right:12px; z-index:60; font-size:12px; color:#7f8cff;
-    text-decoration:none; border:1px solid #2a2f55; padding:4px 10px; border-radius:20px; background:rgba(10,12,30,.6); }
+    height:100vh; height:100dvh; display:flex; gap:12px; padding:12px;
+    background-image:radial-gradient(circle at 15% 0%, rgba(125,91,255,.15), transparent 40%),
+                     radial-gradient(circle at 85% 100%, rgba(255,43,214,.12), transparent 40%); }
+  .vertag { position:fixed; bottom:6px; left:10px; z-index:60; font-size:10px; color:#2f3560; letter-spacing:1px; }
+
+  /* ===== LEFT column: title + questions ===== */
+  .left { flex:0 0 32%; max-width:460px; display:flex; flex-direction:column; gap:12px; min-height:0; }
+  .panel { border-radius:16px; border:1px solid #1c2350; background:rgba(12,16,38,.75);
+    box-shadow:0 0 24px rgba(125,91,255,.12); }
+  .title-panel { position:relative; padding:16px 14px 14px; text-align:center; }
+  .host-link { position:absolute; top:8px; right:10px; font-size:11px; color:#7f8cff; text-decoration:none;
+    border:1px solid #2a2f55; padding:3px 8px; border-radius:20px; background:rgba(10,12,30,.6); }
   .host-link:hover { color:var(--neon); border-color:var(--neon); }
-  .vertag { position:fixed; top:10px; left:12px; z-index:60; font-size:10px; color:#2f3560; letter-spacing:1px; }
-  .title-bar { flex:0 0 auto; text-align:center; padding:6px 10px 0; }
-  .led-title { display:inline-block; font-weight:900; letter-spacing:6px; font-size:clamp(20px, 4vw, 42px);
+  .led-title { display:inline-block; font-weight:900; letter-spacing:5px; font-size:clamp(24px, 3vw, 40px);
     background:linear-gradient(90deg,#00e5ff,#7d5bff,#ff2bd6,#00e5ff); background-size:300% 100%;
     -webkit-background-clip:text; background-clip:text; color:transparent;
     animation:hue 6s linear infinite, flicker 4s infinite; text-shadow:0 0 18px rgba(0,229,255,.35); }
@@ -166,14 +171,23 @@ const USER_HTML = `<!DOCTYPE html>
   @keyframes hue { to { background-position:300% 0; } }
   @keyframes blink { 50% { opacity:.15; } }
   @keyframes flicker { 0%,19%,21%,23%,80%,100%{opacity:1} 20%,22%{opacity:.7} }
-  .subtitle { margin-top:1px; font-size:clamp(8px,1.3vw,11px); letter-spacing:4px; color:#5a63a0; text-transform:uppercase; }
-  .stage { flex:1; display:flex; flex-direction:column; padding:6px 12px 12px; gap:8px; min-height:0; }
-  .image-wrap { position:relative; flex:1; min-height:0; display:flex; align-items:center; justify-content:center;
-    border-radius:18px; overflow:hidden; background:radial-gradient(circle at 50% 30%, #0c1030, #04040c 72%);
+  .subtitle { margin-top:3px; font-size:clamp(9px,1vw,12px); letter-spacing:4px; color:#5a63a0; text-transform:uppercase; }
+
+  .question { flex:1; min-height:0; display:flex; flex-direction:column; justify-content:center;
+    gap:18px; padding:22px 20px; }
+  .q-line { display:flex; align-items:center; gap:16px; font-size:clamp(16px,1.8vw,26px); min-height:1.5em; }
+  .q-line .flag { width:clamp(40px,3.4vw,58px); height:clamp(27px,2.3vw,38px); }
+  .q-line .txt { color:#e8ecff; word-break:break-word; }
+  .q-line.empty .txt { color:#3a4170; }
+
+  /* ===== RIGHT column: big image ===== */
+  .right { flex:1; min-height:0; }
+  .image-wrap { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center;
+    border-radius:18px; overflow:hidden; background:radial-gradient(circle at 50% 40%, #0c1030, #04040c 72%);
     border:1px solid #1c2350; box-shadow:0 0 40px rgba(0,229,255,.15) inset, 0 0 30px rgba(125,91,255,.15); }
   .image-wrap img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
-  .placeholder { font-size:clamp(40px,12vw,140px); font-weight:800; letter-spacing:4px; color:#20264f; text-shadow:0 0 30px rgba(0,229,255,.2); z-index:1; }
-  .tiles { position:absolute; inset:0; display:grid; z-index:5; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr); gap:5px; padding:5px; pointer-events:none; }
+  .placeholder { font-size:clamp(80px,18vw,260px); font-weight:800; color:#20264f; text-shadow:0 0 30px rgba(0,229,255,.2); z-index:1; }
+  .tiles { position:absolute; inset:0; display:grid; z-index:5; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr); gap:6px; padding:6px; pointer-events:none; }
   .tiles.hidden { display:none; }
   .tile { position:relative; border-radius:10px; overflow:hidden; background:linear-gradient(135deg,#141a45,#0a0e26);
     border:1px solid rgba(0,229,255,.35); box-shadow:0 0 12px rgba(0,229,255,.25) inset, 0 0 10px rgba(125,91,255,.2);
@@ -183,34 +197,38 @@ const USER_HTML = `<!DOCTYPE html>
   @keyframes scan { to { background-position:32px 0; } }
   @keyframes pulse { 0%,100%{opacity:.35;transform:scale(.85)} 50%{opacity:.9;transform:scale(1.1)} }
   .tile.open { transform:rotateY(90deg) scale(.4); opacity:0; }
-  .question { flex:0 0 auto; display:flex; flex-direction:column; gap:8px; padding:12px 16px; border-radius:14px;
-    background:rgba(12,16,38,.75); border:1px solid #1c2350; box-shadow:0 0 24px rgba(125,91,255,.12); }
-  .q-line { display:flex; align-items:center; gap:14px; font-size:clamp(15px,2.3vw,24px); min-height:1.5em; }
-  .q-line .flag { width:clamp(32px,4.2vw,46px); height:clamp(21px,2.8vw,30px); }
-  .q-line .txt { color:#e8ecff; }
-  .q-line.empty .txt { color:#3a4170; }
+
   .flash { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:80; background:rgba(3,4,12,.7); }
   .flash.show { display:flex; }
   .flash span { font-size:clamp(30px,8vw,90px); font-weight:900; color:var(--neon); text-shadow:0 0 40px var(--neon2); }
+
+  @media(max-width:760px){
+    body { flex-direction:column; }
+    .left { flex:0 0 auto; max-width:none; }
+    .right { flex:1; }
+    .question { gap:10px; padding:14px 16px; }
+  }
   ${FLAG_CSS}
 </style></head>
 <body>
   <div class="vertag">${APP_VERSION}</div>
-  <a class="host-link" href="/host">Host</a>
-  <div class="title-bar">
-    <div class="led-title">GUEST<span class="dot">·</span>PICTURE</div>
-    <div class="subtitle">Transformation Night</div>
+  <div class="left">
+    <div class="panel title-panel">
+      <a class="host-link" href="/host">Host</a>
+      <div class="led-title">GUEST<span class="dot">·</span>PICTURE</div>
+      <div class="subtitle">Transformation Night</div>
+    </div>
+    <div class="panel question">
+      <div class="q-line empty" id="line1"><span class="flag flag-th"></span><span class="txt" id="t1"></span></div>
+      <div class="q-line empty" id="line2"><span class="flag flag-us"></span><span class="txt" id="t2"></span></div>
+      <div class="q-line empty" id="line3"><span class="flag flag-jp"></span><span class="txt" id="t3"></span></div>
+    </div>
   </div>
-  <div class="stage">
+  <div class="right">
     <div class="image-wrap">
       <div id="placeholder" class="placeholder">?</div>
       <img id="pic" style="display:none"/>
       <div id="tiles" class="tiles hidden"></div>
-    </div>
-    <div class="question">
-      <div class="q-line empty" id="line1"><span class="flag flag-th"></span><span class="txt" id="t1"></span></div>
-      <div class="q-line empty" id="line2"><span class="flag flag-us"></span><span class="txt" id="t2"></span></div>
-      <div class="q-line empty" id="line3"><span class="flag flag-jp"></span><span class="txt" id="t3"></span></div>
     </div>
   </div>
   <div class="flash" id="flash"><span id="flashText"></span></div>
