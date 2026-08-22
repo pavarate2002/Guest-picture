@@ -1,9 +1,12 @@
 // ============================================================
-//  Transformation Night · GUEST PICTURE  (v4.7)
+//  Transformation Night · GUEST PICTURE  (v4.8)
 //  SINGLE FILE — no /public folder, no .html files.
 //    User page  = /            (TWO-COLUMN layout: left=title+questions, right=big image)
 //    Host page  = /host
-//    Version    = /version   -> {"version":"v4.7"}
+//    Version    = /version   -> {"version":"v4.8"}
+//
+//  v4.8: cover tiles are now plain solid panels (removed diagonal stripes
+//        and pulsing glow dots) so they don't strain the eyes.
 //
 //  HOST buttons:
 //   1) Pause / หยุดเวลา  (on Host window)
@@ -14,7 +17,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const APP_VERSION = 'v4.7';
+const APP_VERSION = 'v4.8';
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
@@ -152,13 +155,9 @@ const USER_HTML = `<!DOCTYPE html>
   .placeholder { font-size:clamp(80px,18vw,260px); font-weight:800; color:#20264f; text-shadow:0 0 30px rgba(0,229,255,.2); z-index:1; }
   .tiles { position:absolute; inset:0; display:grid; z-index:5; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr); gap:0; padding:0; pointer-events:none; }
   .tiles.hidden { display:none; }
-  .tile { position:relative; overflow:hidden; background:linear-gradient(135deg,#141a45,#0a0e26);
-    box-shadow:0 0 12px rgba(0,229,255,.18) inset;
+  .tile { position:relative; overflow:hidden; background:#0c1233;
+    box-shadow:0 0 0 1px rgba(28,35,80,.6) inset;
     transition:transform .55s cubic-bezier(.2,.8,.2,1), opacity .55s ease; transform-style:preserve-3d; }
-  .tile::before { content:''; position:absolute; inset:0; background:repeating-linear-gradient(45deg, rgba(0,229,255,.08) 0 8px, transparent 8px 16px); animation:scan 3s linear infinite; }
-  .tile::after { content:''; position:absolute; inset:0; margin:auto; width:38%; height:38%; border-radius:50%; background:radial-gradient(circle, rgba(0,229,255,.55), transparent 70%); filter:blur(2px); animation:pulse 2.4s ease-in-out infinite; }
-  @keyframes scan { to { background-position:32px 0; } }
-  @keyframes pulse { 0%,100%{opacity:.35;transform:scale(.85)} 50%{opacity:.9;transform:scale(1.1)} }
   .tile.open { transform:rotateY(90deg) scale(.4); opacity:0; }
   .flash { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:80; background:rgba(3,4,12,.7); }
   .flash.show { display:flex; }
