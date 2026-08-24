@@ -1,7 +1,7 @@
 {
   "name": "guest-picture",
-  "version": "4.8.0",
-  "description": "Transformation Night - Guest Picture (LED tiles + neon, two-column user layout)",
+  "version": "4.9.0",
+  "description": "Transformation Night - Guest Picture (puzzle + meaning image per question)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

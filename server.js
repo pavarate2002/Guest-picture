@@ -1,23 +1,27 @@
 // ============================================================
-//  Transformation Night · GUEST PICTURE  (v4.8)
+//  Transformation Night · GUEST PICTURE  (v4.9)
 //  SINGLE FILE — no /public folder, no .html files.
 //    User page  = /            (TWO-COLUMN layout: left=title+questions, right=big image)
 //    Host page  = /host
-//    Version    = /version   -> {"version":"v4.8"}
+//    Version    = /version   -> {"version":"v4.9"}
 //
-//  v4.8: cover tiles are now plain solid panels (removed diagonal stripes
-//        and pulsing glow dots) so they don't strain the eyes.
+//  v4.9: each question now has TWO images:
+//        - imgPuzzle  (รูปโจทย์ ที่ถูกแผ่นปิด ให้คนทาย)
+//        - imgMeaning (รูป Meaning / เฉลย)
+//        Two new host buttons:
+//        - Show Puzzle  : reveal the full puzzle image (remove all tiles)
+//        - Show Meaning : switch the user screen to the meaning image (toggle)
 //
 //  HOST buttons:
 //   1) Pause / หยุดเวลา  (on Host window)
 //   2) Reset ลบข้อมูลทั้งหมด
 //   3) Reset เริ่มเกมใหม่ (รูป+โจทย์ยังอยู่ครบ)
-//   4) เพิ่มโจทย์: 1 ข้อ = 1 รูป + 3 คำถาม (ไทย/อังกฤษ/ญี่ปุ่น) บังคับครบ
+//   4) เพิ่มโจทย์: 1 ข้อ = 2 รูป + 3 คำถาม (ไทย/อังกฤษ/ญี่ปุ่น) บังคับครบ
 // ============================================================
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const APP_VERSION = 'v4.8';
+const APP_VERSION = 'v4.9';
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
@@ -25,7 +29,7 @@ const HOST_CODE = 'pqc';
 const PORT = process.env.PORT || 3000;
 const TILE_COUNT = 16;
 const TILE_INTERVAL = 5000;
-function freshState() { return { slides: [], index: 0, phase: 'idle', reveal: null }; }
+function freshState() { return { slides: [], index: 0, phase: 'idle', reveal: null, showMeaning: false }; }
 let state = freshState();
 let tileTimer = null;
 function clearTileTimer() { if (tileTimer) { clearInterval(tileTimer); tileTimer = null; } }
@@ -39,6 +43,12 @@ function openTilesArray() {
 function publicState(forHost) {
   const cur = state.slides[state.index] || null;
   const showImg = (state.phase !== 'idle') || forHost;
+  const meaningOn = !!(state.showMeaning && cur && cur.imgMeaning);
+  let dispImg = null;
+  if (cur) {
+    if (meaningOn) dispImg = cur.imgMeaning;
+    else if (showImg) dispImg = cur.imgPuzzle;
+  }
   return {
     version: APP_VERSION, total: state.slides.length, index: state.index, phase: state.phase,
     tilesOpen: openTilesArray(), revealedCount: state.reveal ? state.reveal.revealedCount : 0,
@@ -46,13 +56,14 @@ function publicState(forHost) {
     nextAt: state.reveal ? state.reveal.nextAt : 0,
     pausedRemaining: state.reveal ? state.reveal.pausedRemaining : 0,
     intervalSec: TILE_INTERVAL / 1000,
-    current: cur ? { img: showImg ? cur.img : null, q1: cur.q1, q2: cur.q2, q3: cur.q3 } : null,
-    slides: forHost ? state.slides.map(s => ({ q1: s.q1, q2: s.q2, q3: s.q3, hasImg: !!s.img })) : undefined
+    meaningShown: meaningOn,
+    current: cur ? { img: dispImg, q1: cur.q1, q2: cur.q2, q3: cur.q3, hasMeaning: !!cur.imgMeaning } : null,
+    slides: forHost ? state.slides.map(s => ({ q1: s.q1, q2: s.q2, q3: s.q3, hasImg: !!s.imgPuzzle, hasMeaning: !!s.imgMeaning })) : undefined
   };
 }
 function broadcast() { io.to('hosts').emit('state', publicState(true)); io.to('users').emit('state', publicState(false)); }
 function startTiles() {
-  clearTileTimer(); state.phase = 'tiles';
+  clearTileTimer(); state.phase = 'tiles'; state.showMeaning = false;
   state.reveal = { order: shuffle([...Array(TILE_COUNT).keys()]), revealedCount: 0, paused: false, nextAt: Date.now() + TILE_INTERVAL, pausedRemaining: 0 };
   broadcast();
   tileTimer = setInterval(() => {
@@ -74,22 +85,33 @@ io.on('connection', (socket) => {
     else { cb && cb({ ok: false, msg: 'รหัสไม่ถูกต้อง' }); }
   });
   const guard = (fn) => (...a) => { if (socket.isHost) fn(...a); };
-  socket.on('host:addSlide', guard((s) => { state.slides.push({ img: s.img || '', q1: s.q1 || '', q2: s.q2 || '', q3: s.q3 || '' }); broadcast(); }));
+  socket.on('host:addSlide', guard((s) => { state.slides.push({ imgPuzzle: s.imgPuzzle || '', imgMeaning: s.imgMeaning || '', q1: s.q1 || '', q2: s.q2 || '', q3: s.q3 || '' }); broadcast(); }));
   socket.on('host:deleteSlide', guard((i) => {
-    if (state.slides[i]) { state.slides.splice(i, 1); if (state.index >= state.slides.length) state.index = Math.max(0, state.slides.length - 1); state.phase = 'idle'; stopReveal(); broadcast(); }
+    if (state.slides[i]) { state.slides.splice(i, 1); if (state.index >= state.slides.length) state.index = Math.max(0, state.slides.length - 1); state.phase = 'idle'; state.showMeaning = false; stopReveal(); broadcast(); }
   }));
-  socket.on('host:goto', guard((i) => { if (i >= 0 && i < state.slides.length) { state.index = i; state.phase = 'idle'; stopReveal(); broadcast(); } }));
-  socket.on('host:next', guard(() => { if (state.index < state.slides.length - 1) { state.index++; state.phase = 'idle'; stopReveal(); broadcast(); } }));
-  socket.on('host:prev', guard(() => { if (state.index > 0) { state.index--; state.phase = 'idle'; stopReveal(); broadcast(); } }));
+  socket.on('host:goto', guard((i) => { if (i >= 0 && i < state.slides.length) { state.index = i; state.phase = 'idle'; state.showMeaning = false; stopReveal(); broadcast(); } }));
+  socket.on('host:next', guard(() => { if (state.index < state.slides.length - 1) { state.index++; state.phase = 'idle'; state.showMeaning = false; stopReveal(); broadcast(); } }));
+  socket.on('host:prev', guard(() => { if (state.index > 0) { state.index--; state.phase = 'idle'; state.showMeaning = false; stopReveal(); broadcast(); } }));
   socket.on('host:countdownStart', guard(() => { startTiles(); }));
-  socket.on('host:start', guard(() => { state.phase = 'full'; clearTileTimer(); broadcast(); }));
+  socket.on('host:start', guard(() => { state.phase = 'full'; state.showMeaning = false; clearTileTimer(); broadcast(); }));
+  // NEW: reveal full puzzle image
+  socket.on('host:showPuzzle', guard(() => { state.phase = 'full'; state.showMeaning = false; clearTileTimer(); broadcast(); }));
+  // NEW: toggle meaning image on the user screen
+  socket.on('host:toggleMeaning', guard(() => {
+    const cur = state.slides[state.index];
+    if (!cur || !cur.imgMeaning) return;
+    if (state.phase === 'idle') state.phase = 'full';
+    state.showMeaning = !state.showMeaning;
+    clearTileTimer();
+    broadcast();
+  }));
   socket.on('host:pause', guard(() => {
     const r = state.reveal; if (state.phase !== 'tiles' || !r) return;
     if (!r.paused) { r.pausedRemaining = Math.max(0, r.nextAt - Date.now()); r.paused = true; }
     else { r.nextAt = Date.now() + (r.pausedRemaining || TILE_INTERVAL); r.paused = false; }
     broadcast();
   }));
-  socket.on('host:restartGame', guard(() => { state.index = 0; state.phase = 'idle'; stopReveal(); io.to('users').emit('flash', 'เริ่มเกมใหม่!'); broadcast(); }));
+  socket.on('host:restartGame', guard(() => { state.index = 0; state.phase = 'idle'; state.showMeaning = false; stopReveal(); io.to('users').emit('flash', 'เริ่มเกมใหม่!'); broadcast(); }));
   socket.on('host:resetAll', guard(() => { stopReveal(); state = freshState(); broadcast(); }));
 });
 // ---------- Shared CSS: flags drawn with CSS (render on Windows) ----------
@@ -220,7 +242,8 @@ const USER_HTML = `<!DOCTYPE html>
     cur = s;
     if (s.current && s.current.img){ pic.src=s.current.img; pic.style.display='block'; placeholder.style.display='none'; }
     else { pic.style.display='none'; placeholder.style.display='block'; }
-    var showTiles = !!(s.current && s.current.img) && s.phase !== 'full';
+    // hide tiles when showing meaning or fully revealed
+    var showTiles = !!(s.current && s.current.img) && s.phase !== 'full' && !s.meaningShown;
     tilesEl.classList.toggle('hidden', !showTiles);
     var open=s.tilesOpen||[]; for (var i=0;i<TILE_N;i++){ tileNodes[i].classList.toggle('open', !!open[i]); }
     if (s.current){ setLine('line1','t1',s.current.q1); setLine('line2','t2',s.current.q2); setLine('line3','t3',s.current.q3); }
@@ -263,6 +286,8 @@ const HOST_HTML = `<!DOCTYPE html>
   .btn-count { background:var(--warn); }
   .btn-start { background:var(--ok); }
   .btn-pause { background:#7f8cff; width:100%; }
+  .btn-puzzle { background:var(--ok); width:100%; }
+  .btn-meaning { background:#00c2b8; width:100%; }
   .btn-restart { background:#00c2b8; width:100%; }
   .btn-rall { background:var(--bad); width:100%; }
   .btn-del { background:var(--bad); padding:5px 9px; font-size:12px; }
@@ -274,17 +299,19 @@ const HOST_HTML = `<!DOCTYPE html>
   .qrow { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
   .qrow .flag { width:32px; height:22px; }
   .qrow input { margin-bottom:0; }
-  .filebtn { display:block; padding:10px; text-align:center; border:1px dashed #2a2f55; border-radius:10px; color:#8b93c9; cursor:pointer; margin-bottom:12px; }
-  .thumb { max-width:100%; max-height:120px; border-radius:8px; margin-bottom:10px; display:none; }
+  .uplabel { display:flex; align-items:center; gap:6px; font-size:12px; color:#8b93c9; margin:2px 0 6px; }
+  .filebtn { display:block; padding:10px; text-align:center; border:1px dashed #2a2f55; border-radius:10px; color:#8b93c9; cursor:pointer; margin-bottom:8px; }
+  .thumb { max-width:100%; max-height:100px; border-radius:8px; margin-bottom:10px; display:none; }
   .hint { font-size:11px; color:#5a63a0; margin-top:4px; }
   .req { color:var(--bad); }
+  .newtag { color:var(--ok); font-size:10px; border:1px solid var(--ok); border-radius:6px; padding:1px 5px; margin-left:6px; }
   .slide-item { display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #1c2350; border-radius:10px; margin-bottom:6px; }
   .slide-item.active { border-color:var(--neon); background:rgba(0,229,255,.06); }
   .slide-item .meta { flex:1; font-size:12px; color:#b7bde8; overflow:hidden; }
   .slide-item .meta div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .slide-item .go { background:#2a2f55; color:#fff; padding:5px 9px; font-size:12px; }
   .preview { text-align:center; }
-  .preview img { max-width:100%; max-height:200px; border-radius:10px; border:1px solid #1c2350; }
+  .preview img { max-width:100%; max-height:180px; border-radius:10px; border:1px solid #1c2350; }
   .preview .ph { padding:40px; color:#3a4170; font-size:48px; }
   .pv-line { display:flex; align-items:center; gap:8px; font-size:12px; color:#b7bde8; margin-top:4px; text-align:left; }
   .pv-line .flag { width:24px; height:16px; }
@@ -302,15 +329,20 @@ const HOST_HTML = `<!DOCTYPE html>
   <div class="app" id="app">
     <div>
       <div class="card">
-        <h3>เพิ่มโจทย์ · 1 ข้อ = 1 รูป + 3 คำถาม (ครบทุกแถว)</h3>
-        <label class="filebtn" for="imgFile" id="fileLabel">📷 เลือกรูปภาพ <span class="req">*จำเป็น</span></label>
-        <input type="file" id="imgFile" accept="image/*" style="display:none"/>
-        <img id="thumb" class="thumb"/>
+        <h3>เพิ่มโจทย์ · 1 ข้อ = 2 รูป + 3 คำถาม (ครบทุกช่อง)</h3>
+        <div class="uplabel">📷 รูปโจทย์ (Puzzle Image) <span class="req">*</span></div>
+        <label class="filebtn" for="imgPuzzle" id="labelPuzzle">เลือกรูปโจทย์</label>
+        <input type="file" id="imgPuzzle" accept="image/*" style="display:none"/>
+        <img id="thumbPuzzle" class="thumb"/>
+        <div class="uplabel">🖼️ รูป Meaning (Answer Image) <span class="req">*</span></div>
+        <label class="filebtn" for="imgMeaning" id="labelMeaning">เลือกรูป Meaning</label>
+        <input type="file" id="imgMeaning" accept="image/*" style="display:none"/>
+        <img id="thumbMeaning" class="thumb"/>
         <div class="qrow"><span class="flag flag-th"></span><input id="q1" placeholder="คำถามภาษาไทย *"/></div>
         <div class="qrow"><span class="flag flag-us"></span><input id="q2" placeholder="Question (English) *"/></div>
         <div class="qrow"><span class="flag flag-jp"></span><input id="q3" placeholder="質問 (日本語) *"/></div>
         <button class="btn-add" onclick="addSlide()">➕ เพิ่มลงเกม</button>
-        <div class="hint">ต้องใส่ <b>รูป 1 รูป + คำถามครบทั้ง 3 แถว</b> ถึงจะเพิ่มได้ · เก็บไว้ล่วงหน้าได้</div>
+        <div class="hint">ต้องใส่ <b>รูปโจทย์ + รูป Meaning + คำถามครบ 3 แถว</b> ถึงจะเพิ่มได้ · เก็บไว้ล่วงหน้าได้</div>
       </div>
       <div class="card" style="margin-top:16px">
         <h3>รายการโจทย์ทั้งหมด</h3>
@@ -334,6 +366,9 @@ const HOST_HTML = `<!DOCTYPE html>
           </div>
           <button class="btn-pause" onclick="socket.emit('host:pause')">⏸ หยุดเวลา / Pause (กดซ้ำ = ไปต่อ)</button>
           <div class="sep"></div>
+          <button class="btn-puzzle" onclick="socket.emit('host:showPuzzle')">✅ รูปเฉลย (Show Puzzle) — เปิดรูปโจทย์เต็ม</button>
+          <button class="btn-meaning" id="btnMeaning" onclick="socket.emit('host:toggleMeaning')">🔍 เปิดรูป Meaning (Show Meaning)</button>
+          <div class="sep"></div>
           <button class="btn-restart" onclick="socket.emit('host:restartGame')">🔄 Reset เริ่มเกมใหม่ (รูป+โจทย์ยังอยู่ครบ)</button>
           <button class="btn-rall" onclick="confirmResetAll()">🗑 Reset ลบข้อมูลทั้งหมด</button>
         </div>
@@ -343,7 +378,7 @@ const HOST_HTML = `<!DOCTYPE html>
   </div>
 <script>
   var socket = io();
-  var pendingImg = '';
+  var pendingPuzzle = '', pendingMeaning = '';
   function login(){
     var code=document.getElementById('code').value.trim();
     socket.emit('host:login', code, function(res){
@@ -352,8 +387,8 @@ const HOST_HTML = `<!DOCTYPE html>
     });
   }
   document.getElementById('code').addEventListener('keydown', function(e){ if(e.key==='Enter') login(); });
-  document.getElementById('imgFile').addEventListener('change', function(e){
-    var file=e.target.files[0]; if(!file) return;
+
+  function handleFile(file, cb){
     var reader=new FileReader();
     reader.onload=function(ev){
       var img=new Image();
@@ -362,32 +397,49 @@ const HOST_HTML = `<!DOCTYPE html>
         if(w>max||h>max){ var r=Math.min(max/w,max/h); w*=r; h*=r; }
         var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
         cv.getContext('2d').drawImage(img,0,0,w,h);
-        pendingImg=cv.toDataURL('image/jpeg',0.85);
-        document.getElementById('fileLabel').innerHTML='✅ '+file.name;
-        var th=document.getElementById('thumb'); th.src=pendingImg; th.style.display='block';
+        cb(cv.toDataURL('image/jpeg',0.85));
       };
       img.src=ev.target.result;
     };
     reader.readAsDataURL(file);
+  }
+  document.getElementById('imgPuzzle').addEventListener('change', function(e){
+    var file=e.target.files[0]; if(!file) return;
+    handleFile(file, function(data){ pendingPuzzle=data; document.getElementById('labelPuzzle').textContent='✅ '+file.name; var th=document.getElementById('thumbPuzzle'); th.src=data; th.style.display='block'; });
   });
+  document.getElementById('imgMeaning').addEventListener('change', function(e){
+    var file=e.target.files[0]; if(!file) return;
+    handleFile(file, function(data){ pendingMeaning=data; document.getElementById('labelMeaning').textContent='✅ '+file.name; var th=document.getElementById('thumbMeaning'); th.src=data; th.style.display='block'; });
+  });
+
   function addSlide(){
     var q1=document.getElementById('q1').value.trim();
     var q2=document.getElementById('q2').value.trim();
     var q3=document.getElementById('q3').value.trim();
-    if(!pendingImg){ alert('⚠️ ต้องใส่รูป 1 รูปต่อ 1 ข้อ'); return; }
+    if(!pendingPuzzle){ alert('⚠️ ต้องใส่รูปโจทย์ (Puzzle Image)'); return; }
+    if(!pendingMeaning){ alert('⚠️ ต้องใส่รูป Meaning (Answer Image)'); return; }
     if(!q1 || !q2 || !q3){ alert('⚠️ ต้องกรอกคำถามให้ครบทั้ง 3 แถว (ไทย/อังกฤษ/ญี่ปุ่น)'); return; }
-    socket.emit('host:addSlide', { img:pendingImg, q1:q1, q2:q2, q3:q3 });
-    pendingImg=''; document.getElementById('imgFile').value='';
-    document.getElementById('fileLabel').innerHTML='📷 เลือกรูปภาพ <span class="req">*จำเป็น</span>';
-    var th=document.getElementById('thumb'); th.src=''; th.style.display='none';
+    socket.emit('host:addSlide', { imgPuzzle:pendingPuzzle, imgMeaning:pendingMeaning, q1:q1, q2:q2, q3:q3 });
+    pendingPuzzle=''; pendingMeaning='';
+    document.getElementById('imgPuzzle').value=''; document.getElementById('imgMeaning').value='';
+    document.getElementById('labelPuzzle').textContent='เลือกรูปโจทย์';
+    document.getElementById('labelMeaning').textContent='เลือกรูป Meaning';
+    var tp=document.getElementById('thumbPuzzle'); tp.src=''; tp.style.display='none';
+    var tm=document.getElementById('thumbMeaning'); tm.src=''; tm.style.display='none';
     document.getElementById('q1').value=''; document.getElementById('q2').value=''; document.getElementById('q3').value='';
   }
   function confirmResetAll(){ if(confirm('ลบรูปและคำถามทั้งหมด? ย้อนกลับไม่ได้')) socket.emit('host:resetAll'); }
   function esc(t){ return (t||'').replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
   function flagLine(cls, text){ return '<div class="pv-line"><span class="flag '+cls+'"></span>'+esc(text||'-')+'</div>'; }
   socket.on('state', function(s){
-    var phaseTxt = s.phase==='full' ? 'เปิดรูปทั้งหมด' : (s.phase==='tiles' ? ('กำลังเปิดแผ่น '+s.revealedCount+'/'+s.tileCount+(s.revealPaused?' (พัก)':'')) : 'ปิดอยู่');
+    var phaseTxt = s.meaningShown ? 'โชว์รูป Meaning' : (s.phase==='full' ? 'เปิดรูปโจทย์เต็ม' : (s.phase==='tiles' ? ('กำลังเปิดแผ่น '+s.revealedCount+'/'+s.tileCount+(s.revealPaused?' (พัก)':'')) : 'ปิดอยู่'));
     document.getElementById('status').innerHTML = 'โจทย์: <b>' + (s.total ? (s.index+1)+' / '+s.total : '—') + '</b> · สถานะ: <b>' + phaseTxt + '</b>';
+    // meaning button label + enable
+    var bm=document.getElementById('btnMeaning');
+    var hasMeaning = s.current && s.current.hasMeaning;
+    bm.disabled = !hasMeaning;
+    bm.style.opacity = hasMeaning ? '1' : '.45';
+    bm.textContent = s.meaningShown ? '↩️ กลับรูปโจทย์ (Hide Meaning)' : '🔍 เปิดรูป Meaning (Show Meaning)';
     var pv=document.getElementById('preview');
     if (s.current){
       var imgHtml = s.current.img ? '<img src="'+s.current.img+'"/>' : '<div class="ph">?</div>';
@@ -397,7 +449,7 @@ const HOST_HTML = `<!DOCTYPE html>
     if(!s.slides || !s.slides.length){ list.innerHTML='<div style="color:#5a63a0;font-size:13px">ยังไม่มีโจทย์</div>'; return; }
     list.innerHTML = s.slides.map(function(sl,i){
       return '<div class="slide-item '+(i===s.index?'active':'')+'">'+
-        '<div class="meta"><div>#'+(i+1)+' '+(sl.hasImg?'🖼':'—')+'</div><div>'+esc(sl.q1||'-')+'</div></div>'+
+        '<div class="meta"><div>#'+(i+1)+' '+(sl.hasImg?'🖼️โจทย์':'—')+' '+(sl.hasMeaning?'🖼️Meaning':'')+'</div><div>'+esc(sl.q1||'-')+'</div></div>'+
         '<button class="go" onclick="socket.emit(\\'host:goto\\','+i+')">ไป</button>'+
         '<button class="btn-del" onclick="socket.emit(\\'host:deleteSlide\\','+i+')">ลบ</button>'+
       '</div>';
