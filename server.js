@@ -1,16 +1,14 @@
 // ============================================================
-//  Transformation Night · GUEST PICTURE  (v4.9)
+//  Transformation Night · GUEST PICTURE  (v5.0)
 //  SINGLE FILE — no /public folder, no .html files.
 //    User page  = /            (TWO-COLUMN layout: left=title+questions, right=big image)
 //    Host page  = /host
-//    Version    = /version   -> {"version":"v4.9"}
+//    Version    = /version   -> {"version":"v5.0"}
 //
-//  v4.9: each question now has TWO images:
-//        - imgPuzzle  (รูปโจทย์ ที่ถูกแผ่นปิด ให้คนทาย)
-//        - imgMeaning (รูป Meaning / เฉลย)
-//        Two new host buttons:
-//        - Show Puzzle  : reveal the full puzzle image (remove all tiles)
-//        - Show Meaning : switch the user screen to the meaning image (toggle)
+//  v5.0: image box now shows the uploaded image AS-IS
+//        - object-fit: contain  (full image, correct ratio, no crop)
+//        - no resize / no compression on upload (original file kept)
+//        Everything else identical to v4.9.
 //
 //  HOST buttons:
 //   1) Pause / หยุดเวลา  (on Host window)
@@ -21,7 +19,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const APP_VERSION = 'v4.9';
+const APP_VERSION = 'v5.0';
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
@@ -173,7 +171,7 @@ const USER_HTML = `<!DOCTYPE html>
   .image-wrap { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center;
     border-radius:18px; overflow:hidden; background:radial-gradient(circle at 50% 40%, #0c1030, #04040c 72%);
     border:1px solid #1c2350; box-shadow:0 0 40px rgba(0,229,255,.15) inset, 0 0 30px rgba(125,91,255,.15); }
-  .image-wrap img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  .image-wrap img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
   .placeholder { font-size:clamp(80px,18vw,260px); font-weight:800; color:#20264f; text-shadow:0 0 30px rgba(0,229,255,.2); z-index:1; }
   .tiles { position:absolute; inset:0; display:grid; z-index:5; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr); gap:0; padding:0; pointer-events:none; }
   .tiles.hidden { display:none; }
@@ -387,20 +385,10 @@ const HOST_HTML = `<!DOCTYPE html>
     });
   }
   document.getElementById('code').addEventListener('keydown', function(e){ if(e.key==='Enter') login(); });
-
+  // v5.0: keep the ORIGINAL image — no resize / no compression
   function handleFile(file, cb){
     var reader=new FileReader();
-    reader.onload=function(ev){
-      var img=new Image();
-      img.onload=function(){
-        var max=1400,w=img.width,h=img.height;
-        if(w>max||h>max){ var r=Math.min(max/w,max/h); w*=r; h*=r; }
-        var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
-        cv.getContext('2d').drawImage(img,0,0,w,h);
-        cb(cv.toDataURL('image/jpeg',0.85));
-      };
-      img.src=ev.target.result;
-    };
+    reader.onload=function(ev){ cb(ev.target.result); };  // ส่ง dataURL ต้นฉบับตรงๆ
     reader.readAsDataURL(file);
   }
   document.getElementById('imgPuzzle').addEventListener('change', function(e){
@@ -411,7 +399,6 @@ const HOST_HTML = `<!DOCTYPE html>
     var file=e.target.files[0]; if(!file) return;
     handleFile(file, function(data){ pendingMeaning=data; document.getElementById('labelMeaning').textContent='✅ '+file.name; var th=document.getElementById('thumbMeaning'); th.src=data; th.style.display='block'; });
   });
-
   function addSlide(){
     var q1=document.getElementById('q1').value.trim();
     var q2=document.getElementById('q2').value.trim();

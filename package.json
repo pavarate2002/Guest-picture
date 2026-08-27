@@ -1,6 +1,6 @@
 {
   "name": "guest-picture",
-  "version": "4.9.0",
+  "version": "5.0.0",
   "description": "Transformation Night - Guest Picture (puzzle + meaning image per question)",
   "main": "server.js",
   "scripts": {
